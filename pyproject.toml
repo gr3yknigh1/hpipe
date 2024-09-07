@@ -1,0 +1,83 @@
+[project]
+name = "hpipe"
+
+description = ""
+readme = "README.md"
+requires-python = ">=3.8"
+
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "typing_extensions; python_version < \"3.10\"",
+]
+
+dynamic = ["version"]
+
+[project.scripts]
+hpipe = "hpipe.__main__:main"
+
+[project.optional-dependencies]
+types = []
+dev = [
+    "ruff>=0.6.4", 
+    "mypy>=0.991", 
+    "pytest>=7",
+    "tox>=4", 
+]
+
+[build-system]
+requires = ["setuptools", "wheel", "setuptools-git-versioning<2", ]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+
+[tool.mypy]
+exclude = [
+    '^setup\.py$',
+    '^dist/',
+    '^build/',
+]
+
+[tool.bandit]
+exclude = [
+    "setup.py",
+]
+exclude_dirs = [
+    ".tox",
+    "examples",
+    "build",
+    "dist",
+    "tests",
+]
+
+[tool.ruff]
+exclude = [
+    "dist",
+    "build",
+    ".tox",
+    ".ruff_cache",
+]
+line-length = 79
+indent-width = 4
+respect-gitignore = false
+target-version = "py37"
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "lf"
+docstring-code-format = true
+docstring-code-line-length = 60
+
+[tool.ruff.lint]
+ignore = ["E741", "E743", "F841"]
+task-tags = ["todo", "fixme", "warn", "xxx", "hack"]
