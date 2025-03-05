@@ -52,6 +52,7 @@ def _handler_run(parser: ArgumentParser, args: Any):
     root_dir: str = os.path.abspath(args.root_dir)
     pipeline_file: str = args.pipeline_file
     pipeline_var: str = args.pipeline_var
+    dry_run: bool = args.dry_run
 
     if not os.path.exists(root_dir):
         raise _PathNotExists(root_dir)
@@ -86,7 +87,7 @@ def _handler_run(parser: ArgumentParser, args: Any):
 
     logger.debug(f"PIPELINE_INSTANCE: {pipeline_instance!r}")
 
-    execute_pipeline(pipeline_instance)
+    execute_pipeline(pipeline_instance, dry_run=dry_run)
 
 
 def main() -> int:
@@ -106,6 +107,9 @@ def main() -> int:
     )
     run_parser.add_argument(
         "-v", "--pipeline-var", default="pipeline", dest="pipeline_var"
+    )
+    run_parser.add_argument(
+        "-n", "--dry-run", default=False, dest="dry_run", action="store_true"
     )
 
     args = parser.parse_args()

@@ -13,7 +13,9 @@ __all__ = ("execute_pipeline",)
 logger = getLogger("internal")
 
 
-def execute_job(job: Job) -> None:
+def execute_job(job: Job, *, dry_run=False) -> None:
+    _ = dry_run
+
     try:
         job.handler(job)
     except BaseException as e:
@@ -21,7 +23,7 @@ def execute_job(job: Job) -> None:
         raise errors.JobFailed()
 
 
-def execute_pipeline(pipeline: Pipeline) -> None:
+def execute_pipeline(pipeline: Pipeline, *, dry_run=False) -> None:
     stages: Dict[str, List[Job]] = OrderedDict()
 
     for stage in pipeline.stages:
@@ -46,8 +48,10 @@ def execute_pipeline(pipeline: Pipeline) -> None:
         failed_jobs: List[Job] = []
 
         for job in jobs:
+            job.dry_run = dry_run
+
             try:
-                execute_job(job)
+                execute_job(job, dry_run=dry_run)
             except errors.JobFailed:
                 failed_jobs.append(job)
 

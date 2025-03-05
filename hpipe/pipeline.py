@@ -60,6 +60,8 @@ class Job:
 
     required_commands: Sequence[str]
 
+    dry_run: bool = field(default=False)
+
     def run(
         self,
         command: str,
@@ -76,6 +78,7 @@ class Job:
             for command in self.required_commands
             if shutil.which(command) is None
         ]
+
         if len(missing_commands) > 0:
             raise errors.JobRequiredCommandNotFound(
                 missing=missing_commands, required=self.required_commands
@@ -83,12 +86,12 @@ class Job:
 
         logger.info(f"Executing: {command!r}...")
 
-        returncode = shell.execute(command, timeout=timeout)
+        if not self.dry_run:
+            returncode = shell.execute(command, timeout=timeout)
+            logger.info(f"Command {command!r} exited with {returncode} code.")
 
-        logger.info(f"Command {command!r} exited with {returncode} code.")
-
-        if returncode != success_returncode:
-            raise errors.JobCommandFailed(command, returncode)
+            if returncode != success_returncode:
+                raise errors.JobCommandFailed(command, returncode)
 
 
 _already_called: Set[Callable] = set()
@@ -145,15 +148,17 @@ class Pipeline:
     def define_job(
         self, *, stage: str, require_commands: Optional[Sequence[str]] = None
     ) -> Callable[[JobHandler], JobHandler]:
+
+        if require_commands is None:
+            require_commands = []
+
         def internal(handler: JobHandler) -> JobHandler:
+            nonlocal require_commands
+
             if stage not in self.stages:
                 raise errors.StageIsNotDefined(
                     stage, defined_stages=self.stages
                 )
-
-            nonlocal require_commands
-            if require_commands is None:
-                require_commands = []
 
             job = Job(
                 stage=stage,
@@ -161,6 +166,7 @@ class Pipeline:
                 required_commands=require_commands,
             )
             self.jobs.append(job)
+
             return handler
 
         return internal
