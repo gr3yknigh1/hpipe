@@ -1,7 +1,13 @@
+from __future__ import annotations
 from typing import Sequence
 from typing import Set
+from typing import TYPE_CHECKING
 
 from dataclasses import dataclass
+
+if TYPE_CHECKING:
+    from hpipe.pipeline import Job
+    from hpipe.pipeline import Pipeline
 
 __all__ = ("JobFailed", "StageIsNotDefined", "StagesAreAlreadyDefined")
 
@@ -33,13 +39,24 @@ class JobCommandFailed(Exception):
 
 @dataclass
 class StageIsNotDefined(Exception):
-    stage: str
+    job: Job
     defined_stages: Sequence[str]
 
     def __post_init__(self):
         super().__init__(
-            f"Stage doesn't defined: {self.stage!r}, stages={self.defined_stages!r}"
+            f"Stage doesn't defined: {self.job.stage!r}, stages={self.defined_stages!r}. Referenced from job={self.job!r}"
         )
+
+
+# @dataclass
+# class StageCantBeNone(Exception):
+#     job: Job
+#     defined_stages: Pipeline
+
+#     def __post_init__(self):
+#         super().__init__(
+#             f"Stage can't be None: pipeline={self.pipeline!r}. Referenced from job={self.job!r}"
+#         )
 
 
 @dataclass

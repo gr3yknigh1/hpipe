@@ -1,9 +1,11 @@
-# === Python cache ===
+#
+# Python
+#
 *.egg-info
 __pycache__
 build
+.venv
 
-# === Python tooling ===
 .tox
 .ruff_cache
 .mypy_cache

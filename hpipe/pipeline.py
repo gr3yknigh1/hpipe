@@ -1,64 +1,47 @@
+from __future__ import annotations
 from typing import Callable
 from typing import List
-from typing import TypeVar
 from typing import Set
 from typing import Optional
 from typing import Sequence
-
-import sys
-
-if sys.version_info >= (3, 10):
-    from typing import ParamSpec
-else:
-    from typing_extensions import ParamSpec
+from typing import Dict
 
 from collections import Counter
+from collections import OrderedDict
 from dataclasses import dataclass
 from dataclasses import field
 from logging import getLogger
-from abc import ABC
-from abc import abstractmethod
+from functools import partial
 import subprocess
 import shlex
 import shutil
 
 from hpipe import errors
+from hpipe.requires import require_call_once
 
-__all__ = ("Pipeline", "Job")
+__all__ = ("Pipeline", "Job", "define_job")
 
-_ParamsType = ParamSpec("_ParamsType")
-_ReturnType = TypeVar("_ReturnType")
-
-JobHandler = Callable[["Job"], None]
-
+Stage = str
+JobProcedure = Callable[[...], None]
 
 logger = getLogger("pipeline")
 
 
-class Shell(ABC):
-    @abstractmethod
-    def execute(self, command: str, *, timeout: Optional[float]) -> int:
-        raise NotImplementedError()
+def echo(command: str):
+    print(command)
 
 
-class Bash(Shell):
-    def execute(self, command: str, *, timeout: Optional[float] = None) -> int:
-        command_wrapper = f"bash -c '{command}'"
-
-        print()
-        proc = subprocess.Popen(args=shlex.split(command_wrapper))
-        proc.wait(timeout=timeout)
-        print()
-
-        return proc.returncode
+def shell_execute(command: str, *, timeout: Optional[float] = None) -> int:
+    process = subprocess.Popen(args=shlex.split(command))
+    process.wait(timeout=timeout)
+    return process.returncode
 
 
 @dataclass
 class Job:
-    stage: str
-    handler: JobHandler = field(repr=False)
-
-    required_commands: Sequence[str]
+    stage: Stage
+    handler: JobProcedure = field(repr=False)
+    required_programs: Sequence[str]
 
     dry_run: bool = field(default=False)
 
@@ -68,59 +51,30 @@ class Job:
         *,
         timeout: Optional[float] = None,
         success_returncode=0,
-        shell: Optional[Shell] = None,
     ):
-        if shell is None:
-            shell = Bash()
-
         missing_commands = [
             command
-            for command in self.required_commands
+            for command in self.required_programs
             if shutil.which(command) is None
         ]
 
         if len(missing_commands) > 0:
             raise errors.JobRequiredCommandNotFound(
-                missing=missing_commands, required=self.required_commands
+                missing=missing_commands, required=self.required_programs
             )
 
-        logger.info(f"Executing: {command!r}...")
+        if self.dry_run:
+            echo(command)
+            return
 
-        if not self.dry_run:
-            returncode = shell.execute(command, timeout=timeout)
-            logger.info(f"Command {command!r} exited with {returncode} code.")
+        returncode = shell_execute(command, timeout=timeout)
 
-            if returncode != success_returncode:
-                raise errors.JobCommandFailed(command, returncode)
-
-
-_already_called: Set[Callable] = set()
-
-
-class AlreadyCalledError(Exception): ...
-
-
-def require_call_once(*, error_message: str):
-    def internal(
-        func: Callable[_ParamsType, _ReturnType],
-    ) -> Callable[_ParamsType, _ReturnType]:
-        def wrapper(
-            *args: _ParamsType.args, **kwargs: _ParamsType.kwargs
-        ) -> _ReturnType:
-            global _already_called
-            if func in _already_called:
-                raise AlreadyCalledError(f"{func.__name__}(): {error_message}")
-            _already_called.add(func)
-
-            return func(*args, **kwargs)
-
-        return wrapper
-
-    return internal
+        if returncode != success_returncode:
+            raise errors.JobCommandFailed(command, returncode)
 
 
 class Pipeline:
-    stages: List[str]
+    stages: List[Stage]
     jobs: List[Job]
 
     def __init__(self):
@@ -128,11 +82,11 @@ class Pipeline:
         self.jobs = []
 
     def __repr__(self):
-        return f"Pipeline(stages={self.stages!r} jobs={self.jobs!r})"
+        return f"Pipeline(stages={self.stages!r}, jobs={self.jobs!r})"
 
     @require_call_once(error_message="Stages should be defined once")
-    def define_stages(self, *stages: str):
-        duplicated_stages: Set[str] = set()
+    def define_stages(self, *stages: Stage):
+        duplicated_stages: Set[Stage] = set()
 
         stage_counter = Counter()
         for stage in stages:
@@ -146,27 +100,72 @@ class Pipeline:
         self.stages = list(stages)
 
     def define_job(
-        self, *, stage: str, require_commands: Optional[Sequence[str]] = None
-    ) -> Callable[[JobHandler], JobHandler]:
+        self, *, stage: Stage, required_programs: Optional[Sequence[str]] = None
+    ) -> Callable[[JobProcedure], JobProcedure]:
 
-        if require_commands is None:
-            require_commands = []
+        if required_programs is None:
+            required_programs = []
 
-        def internal(handler: JobHandler) -> JobHandler:
-            nonlocal require_commands
-
-            if stage not in self.stages:
-                raise errors.StageIsNotDefined(
-                    stage, defined_stages=self.stages
-                )
+        def internal_job_procedure(job_procedure: JobProcedure) -> JobProcedure:
 
             job = Job(
                 stage=stage,
-                handler=handler,
-                required_commands=require_commands,
+                handler=job_procedure,
+                required_programs=required_programs,
             )
             self.jobs.append(job)
 
-            return handler
+            return job_procedure
 
-        return internal
+        return internal_job_procedure
+
+
+orphan_pipeline = Pipeline()
+orphan_pipeline.define_stages("default")
+define_job = partial(orphan_pipeline.define_job, stage="default")
+
+def execute_job(job: Job, *, dry_run=False) -> None:
+    _ = dry_run
+
+    try:
+        job.handler(job)
+    except BaseException as e:
+        logger.error("Exception during job execution", exc_info=e)
+        raise errors.JobFailed()
+
+def execute_pipeline(pipeline: Pipeline, *, dry_run=False) -> None:
+    stages: Dict[str, List[Job]] = OrderedDict()
+
+    for stage in pipeline.stages:
+        stages[stage] = []
+
+    for job in pipeline.jobs:
+
+        # if job.stage is None:
+        #     raise errors.StageCantBeNone(job, pipeline)
+
+        if job.stage not in pipeline.stages:
+            raise errors.StageIsNotDefined(job, pipeline.stages)
+
+        stages[job.stage].append(job)
+
+    for stage in stages.keys():
+        jobs = stages[stage]
+
+        if len(jobs) == 0:
+            logger.warning(f"{stage!r} has no jobs!")
+            continue
+
+        failed_jobs: List[Job] = []
+
+        for job in jobs:
+            job.dry_run = dry_run
+
+            try:
+                execute_job(job, dry_run=dry_run)
+            except errors.JobFailed:
+                failed_jobs.append(job)
+
+        if len(failed_jobs) > 0:
+            break
+
