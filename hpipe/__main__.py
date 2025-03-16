@@ -40,13 +40,16 @@ class _PipelineInstanceNotFound(Exception):
             f"Failed to find pipeline instance in module[{self.pipeline_path!r}]: {self.instance_var!r}",
         )
 
+
 def execute_file(file=DEFAULT_PIPELINE_FILE, var=DEFAULT_PIPELINE_VAR):
     ...
+
 
 def _handler_help(parser: ArgumentParser, args: Any):
     _ = args
 
     parser.print_help()
+
 
 def _handler_run(parser: ArgumentParser, args: Any):
     _ = parser

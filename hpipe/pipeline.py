@@ -22,7 +22,7 @@ from hpipe.requires import require_call_once
 __all__ = ("Pipeline", "Job", "define_job")
 
 Stage = str
-JobProcedure = Callable[[...], None]
+JobProcedure = Callable[..., None]
 
 logger = getLogger("pipeline")
 
@@ -42,9 +42,14 @@ class Job:
     stage: Stage
     handler: JobProcedure = field(repr=False)
     required_programs: Sequence[str]
-
     dry_run: bool = field(default=False)
 
+
+@dataclass
+class Context:
+
+    dry_run: bool = field(default=False)
+    
     def run(
         self,
         command: str,
@@ -52,17 +57,6 @@ class Job:
         timeout: Optional[float] = None,
         success_returncode=0,
     ):
-        missing_commands = [
-            command
-            for command in self.required_programs
-            if shutil.which(command) is None
-        ]
-
-        if len(missing_commands) > 0:
-            raise errors.JobRequiredCommandNotFound(
-                missing=missing_commands, required=self.required_programs
-            )
-
         if self.dry_run:
             echo(command)
             return
@@ -125,13 +119,15 @@ orphan_pipeline.define_stages("default")
 define_job = partial(orphan_pipeline.define_job, stage="default")
 
 def execute_job(job: Job, *, dry_run=False) -> None:
-    _ = dry_run
+
+    context = Context(job=job, dry_run=dry_run)
 
     try:
-        job.handler(job)
+        job.handler(context)
     except BaseException as e:
         logger.error("Exception during job execution", exc_info=e)
         raise errors.JobFailed()
+
 
 def execute_pipeline(pipeline: Pipeline, *, dry_run=False) -> None:
     stages: Dict[str, List[Job]] = OrderedDict()
@@ -139,15 +135,25 @@ def execute_pipeline(pipeline: Pipeline, *, dry_run=False) -> None:
     for stage in pipeline.stages:
         stages[stage] = []
 
+    missing_commands: Dict[Job, List[str]] = []
+
     for job in pipeline.jobs:
-
-        # if job.stage is None:
-        #     raise errors.StageCantBeNone(job, pipeline)
-
         if job.stage not in pipeline.stages:
             raise errors.StageIsNotDefined(job, pipeline.stages)
+        
+        for required_program in job.required_programs:
+            if shutil.which(required_program) is not None:
+                continue
+            
+            if job not in missing_commands.keys():
+                missing_commands[job] = []
+            missing_commands.append(required_program)
 
         stages[job.stage].append(job)
+
+
+    if len(missing_commands) > 0:
+        raise errors.PipelineMissingRequiredCommands(missing=missing_commands)
 
     for stage in stages.keys():
         jobs = stages[stage]

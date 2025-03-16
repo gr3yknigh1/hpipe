@@ -23,6 +23,7 @@ dynamic = ["version"]
 
 [project.scripts]
 hpipe = "hpipe.__main__:main"
+htask = "htask.__main__:main"
 
 [project.optional-dependencies]
 types = []

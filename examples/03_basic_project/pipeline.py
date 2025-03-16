@@ -1,7 +1,9 @@
 
 from hpipe import define_job, Job
 
-
 @define_job()
-def _build(j: Job):
+def build(j: Job):
+
+    j.cwd
+
     j.run("echo I: Building...")

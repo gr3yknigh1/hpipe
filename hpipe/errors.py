@@ -1,13 +1,13 @@
 from __future__ import annotations
 from typing import Sequence
 from typing import Set
+from typing import Dict
 from typing import TYPE_CHECKING
 
 from dataclasses import dataclass
 
 if TYPE_CHECKING:
     from hpipe.pipeline import Job
-    from hpipe.pipeline import Pipeline
 
 __all__ = ("JobFailed", "StageIsNotDefined", "StagesAreAlreadyDefined")
 
@@ -22,7 +22,16 @@ class JobRequiredCommandNotFound(Exception):
 
     def __post_init__(self):
         super().__init__(
-            f"Missing commands: {self.missing}. Required: {self.required}"
+            f"Missing commands: {self.missing}. Required: {self.required}."
+        )
+
+@dataclass
+class PipelineMissingRequiredCommands(Exception):
+    missing: Dict[Job, Sequence[str]]
+    
+    def __post_init__(self):
+        super().__init__(
+            f"Missing commands: {self.missing}"
         )
 
 
@@ -52,7 +61,7 @@ class StageIsNotDefined(Exception):
 # class StageCantBeNone(Exception):
 #     job: Job
 #     defined_stages: Pipeline
-
+#
 #     def __post_init__(self):
 #         super().__init__(
 #             f"Stage can't be None: pipeline={self.pipeline!r}. Referenced from job={self.job!r}"
