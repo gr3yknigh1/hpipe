@@ -219,7 +219,7 @@ def generate_argument_descriptions_for_tasks(
 
             result[task.name].append(
                 ArgumentDescription(
-                    dest=p_name.replace("_", "-"),
+                    dest=p_name,
                     switches=generate_switches(p_name),
                     type=lambda v: p_type(v) if p_type is not None else str,
                     format=(
@@ -246,7 +246,8 @@ def generate_switches(name: str) -> list[str]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    argv = argv[1:] if argv is not None else []
+    argv = argv if argv is not None else sys.argv
+    argv = argv[1:]
 
     parser = ArgumentParser()
     parser.add_argument(
@@ -302,7 +303,7 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(sys.argv))
+    raise SystemExit(main())
     raise SystemExit(main(["htask", "build", "--reconfigure"]))
     raise SystemExit(main(["htask", "-C", "examples/03_basic_project"]))
     raise SystemExit(

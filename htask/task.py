@@ -54,6 +54,7 @@ class Context:
         capture_output=False,
         env: dict[str, Any] | None = None,
     ) -> Result:
+        command = command.replace("\\", "/") # XXX
         parts = [*self.prefixes, *shlex.split(command)]
         # TODO(gr3yknigh1): Replace shlex.split with custom splitter, because shlex only suitable for POSIX shells [2025/03/16]
 
