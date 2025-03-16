@@ -19,6 +19,7 @@ class AlreadyCalledError(Exception): ...
 
 _already_called: Set[Callable] = set()
 
+# TODO(gr3yknigh1): Doesn't work for methods! [2025/03/16]
 def require_call_once(*, error_message: str):
     def internal(
         func: Callable[_ParamsType, _ReturnType],
@@ -32,7 +33,6 @@ def require_call_once(*, error_message: str):
             _already_called.add(func)
 
             return func(*args, **kwargs)
-
         return wrapper
 
     return internal

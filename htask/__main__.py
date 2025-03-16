@@ -1,4 +1,5 @@
 from __future__ import annotations
+from typing import cast
 from typing import Any
 from typing import TypeVar
 from typing import Callable
@@ -11,7 +12,7 @@ import importlib.util
 
 from htask import Task, Context, Config
 from htask.task import orphan_tasks
-from htask.parser import ArgumentDescription, ArgumentStoreType
+from htask.parser import ArgumentDescription, ArgumentFormat
 
 
 SWITCH_START = "-"
@@ -54,14 +55,14 @@ class ArgumentParser:
         self,
         *switches: str,
         dest: str,
-        type: Callable[[str], Ty] = str,
-        format=ArgumentStoreType.STORE_VALUE,
+        type: Callable[[str], Ty] = cast(Callable[[str], Ty], str),
+        format=ArgumentFormat.STORE_VALUE,
         default: Ty | None = None,
     ) -> ArgumentDescription[Ty]:
         new_argument: ArgumentDescription[Ty] = ArgumentDescription(
             dest=dest,
             switches=list(switches),
-            type=type,
+            convert=type,
             format=format,
             default=default,
         )
@@ -97,13 +98,12 @@ class ArgumentParser:
             for argument in arguments:
                 if self.parse_current not in argument.switches:
                     continue
-                if argument.format == ArgumentStoreType.STORE_VALUE:
-                    swicthes[argument.dest] = argument.type(
-                        self.parse_advance()
-                    )
-                elif argument.format == ArgumentStoreType.STORE_TRUE:
+
+                if argument.format == ArgumentFormat.STORE_VALUE:
+                    swicthes[argument.dest] = argument.convert(self.parse_advance())
+                elif argument.format == ArgumentFormat.STORE_TRUE:
                     swicthes[argument.dest] = True
-                elif argument.format == ArgumentStoreType.STORE_FALSE:
+                elif argument.format == ArgumentFormat.STORE_FALSE:
                     swicthes[argument.dest] = False
                 break
             else:
@@ -221,11 +221,11 @@ def generate_argument_descriptions_for_tasks(
                 ArgumentDescription(
                     dest=p_name,
                     switches=generate_switches(p_name),
-                    type=lambda v: p_type(v) if p_type is not None else str,
+                    convert=p_type if p_type is not None else str,
                     format=(
-                        ArgumentStoreType.STORE_VALUE
+                        ArgumentFormat.STORE_VALUE
                         if p_type is not bool
-                        else ArgumentStoreType.STORE_TRUE
+                        else ArgumentFormat.STORE_TRUE
                     ),
                     default=(
                         p_obj.default if p_obj.default != p_obj.empty else None
@@ -262,6 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     working_dir = args.get("working_dir")
     assert working_dir
+
+    working_dir = os.path.abspath(working_dir)
 
     task_file = args.get("task_file")
     assert task_file
@@ -304,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-    raise SystemExit(main(["htask", "build", "--reconfigure"]))
+    raise SystemExit(main(["htask", "-C", r"P:\garden", "build", "-b", "Release"]))
     raise SystemExit(main(["htask", "-C", "examples/03_basic_project"]))
     raise SystemExit(
         main(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 from typing import Sequence
 from typing import Set
-from typing import Dict
 from typing import TYPE_CHECKING
 
 from dataclasses import dataclass
@@ -26,8 +25,8 @@ class JobRequiredCommandNotFound(Exception):
         )
 
 @dataclass
-class PipelineMissingRequiredCommands(Exception):
-    missing: Dict[Job, Sequence[str]]
+class PipelineMissingRequiredPrograms(Exception):
+    missing: dict[Job, list[str]]
     
     def __post_init__(self):
         super().__init__(

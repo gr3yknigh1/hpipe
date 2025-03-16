@@ -8,15 +8,14 @@ from htask import Context
 #
 # VS utilities
 #
-
 DEFAULT_VC_BOOSTRAP_VARS = ["INCLUDE", "LIB", "LIBPATH", "PATH"]
 
 
 def find_vcvars(c: Context) -> str | None:
+    
     #
     # Detect vcvarsall for x64 build...
     #
-
     default_vc2022_bootstrap = r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
     default_vc2019_bootstrap = r"C:\Program Files (x86)\Microsoft Visual Studio\2019\Preview\VC\Auxiliary\Build\vcvarsall.bat"
 
@@ -57,7 +56,6 @@ def extract_env_from_vcvars(c: Context, arch="x64", vcvars: str | None = None, e
 #
 # MSVC command line helpers:
 #
-
 def format_defines(defines: dict[str, Any]) -> str:
 
     result = " ".join(
@@ -67,11 +65,9 @@ def format_defines(defines: dict[str, Any]) -> str:
     return result
 
 def format_includes(includes: list[str]) -> str:
-
     result = " ".join(
         [f"/I {include}" for include in includes]
     )
-
     return result
 
 def compile(

@@ -11,7 +11,7 @@ import enum
 Ty = TypeVar("Ty")
 
 
-class ArgumentStoreType(enum.StrEnum):
+class ArgumentFormat(enum.StrEnum):
     STORE_VALUE = "store_value"
     STORE_TRUE = "store_true"
     STORE_FALSE = "store_false"
@@ -21,6 +21,6 @@ class ArgumentStoreType(enum.StrEnum):
 class ArgumentDescription(Generic[Ty]):
     dest: str
     switches: list[str]
-    type: Callable[[str], Ty]
-    format: ArgumentStoreType = field(default=ArgumentStoreType.STORE_VALUE)
+    convert: Callable[[str], Ty]
+    format: ArgumentFormat = field(default=ArgumentFormat.STORE_VALUE)
     default: Ty | None = field(default=None)

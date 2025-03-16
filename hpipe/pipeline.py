@@ -17,7 +17,7 @@ import shlex
 import shutil
 
 from hpipe import errors
-from hpipe.requires import require_call_once
+# from hpipe.requires import require_call_once
 
 __all__ = ("Pipeline", "Job", "define_job")
 
@@ -78,11 +78,12 @@ class Pipeline:
     def __repr__(self):
         return f"Pipeline(stages={self.stages!r}, jobs={self.jobs!r})"
 
-    @require_call_once(error_message="Stages should be defined once")
+    # NOTE(gr3yknigh1): Doesn't work for more than one pipeline... [2025/03/16]
+    # @require_call_once(error_message="Stages should be defined once")
     def define_stages(self, *stages: Stage):
         duplicated_stages: Set[Stage] = set()
 
-        stage_counter = Counter()
+        stage_counter: Counter[Stage] = Counter()
         for stage in stages:
             stage_counter[stage] += 1
             if stage_counter[stage] > 1:
@@ -135,7 +136,7 @@ def execute_pipeline(pipeline: Pipeline, *, dry_run=False) -> None:
     for stage in pipeline.stages:
         stages[stage] = []
 
-    missing_commands: Dict[Job, List[str]] = []
+    missing_programs: dict[Job, list[str]] = {}
 
     for job in pipeline.jobs:
         if job.stage not in pipeline.stages:
@@ -145,15 +146,15 @@ def execute_pipeline(pipeline: Pipeline, *, dry_run=False) -> None:
             if shutil.which(required_program) is not None:
                 continue
             
-            if job not in missing_commands.keys():
-                missing_commands[job] = []
-            missing_commands.append(required_program)
+            if job not in missing_programs.keys():
+                missing_programs[job] = []
+            missing_programs[job].append(required_program)
 
         stages[job.stage].append(job)
 
 
-    if len(missing_commands) > 0:
-        raise errors.PipelineMissingRequiredCommands(missing=missing_commands)
+    if len(missing_programs) > 0:
+        raise errors.PipelineMissingRequiredPrograms(missing=missing_programs)
 
     for stage in stages.keys():
         jobs = stages[stage]
