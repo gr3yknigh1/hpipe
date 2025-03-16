@@ -10,7 +10,7 @@ import inspect
 import importlib.util
 
 from htask import Task, Context, Config
-from htask.task import orphan_tasks 
+from htask.task import orphan_tasks
 from htask.parser import ArgumentDescription, ArgumentStoreType
 
 
@@ -19,13 +19,13 @@ SWITCH_START = "-"
 
 Ty = TypeVar("Ty")
 
-class ArgumentParser:
 
+class ArgumentParser:
     arguments: list[ArgumentDescription[Any]]
 
     parse_arguments: list[str]
     parse_index: int
-    parse_current: str 
+    parse_current: str
 
     def __init__(self):
         self.arguments = []
@@ -46,7 +46,7 @@ class ArgumentParser:
         if self.parse_index + offset < len(self.parse_arguments):
             return self.parse_arguments[self.parse_index + offset]
         return self.parse_arguments[len(self.parse_arguments) - 1]
-    
+
     def should_stop(self) -> bool:
         return self.parse_index >= len(self.parse_arguments)
 
@@ -56,10 +56,14 @@ class ArgumentParser:
         dest: str,
         type: Callable[[str], Ty] = str,
         format=ArgumentStoreType.STORE_VALUE,
-        default: Ty | None = None
+        default: Ty | None = None,
     ) -> ArgumentDescription[Ty]:
         new_argument: ArgumentDescription[Ty] = ArgumentDescription(
-            dest=dest, switches=list(switches), type=type, format=format, default=default
+            dest=dest,
+            switches=list(switches),
+            type=type,
+            format=format,
+            default=default,
         )
 
         for argument in self.arguments:
@@ -76,41 +80,43 @@ class ArgumentParser:
         self.parse_arguments = arguments
         return self.parse_switches(self.arguments)
 
-    def parse_switches(self, arguments: list[ArgumentDescription] | None = None) -> dict[str, Any | None]:
-
+    def parse_switches(
+        self, arguments: list[ArgumentDescription] | None = None
+    ) -> dict[str, Any | None]:
         # NOTE(gr3yknigh1): Hack! [2025/03/16]
         if arguments is None:
             arguments = self.arguments
-            
+
         swicthes: dict[str, Any | None] = {
-            argument.dest : argument.default for argument in arguments
+            argument.dest: argument.default for argument in arguments
         }
 
-        while self.peek_argument(1).startswith(SWITCH_START):
-
+        while self.peek_argument(1).startswith(SWITCH_START) and not self.should_stop():
             self.parse_advance()
 
             for argument in arguments:
                 if self.parse_current not in argument.switches:
                     continue
                 if argument.format == ArgumentStoreType.STORE_VALUE:
-                    swicthes[argument.dest] = argument.type(self.parse_advance())
+                    swicthes[argument.dest] = argument.type(
+                        self.parse_advance()
+                    )
                 elif argument.format == ArgumentStoreType.STORE_TRUE:
                     swicthes[argument.dest] = True
                 elif argument.format == ArgumentStoreType.STORE_FALSE:
                     swicthes[argument.dest] = False
                 break
             else:
-                raise Exception(f"Unrecognized argument: {self.parse_current!r}. Argument={arguments!r}")                          
+                raise Exception(
+                    f"Unrecognized argument: {self.parse_current!r}. Argument={arguments!r}"
+                )
 
         self.parse_advance()
         return swicthes
-    
+
     def parse_task_args(
         self, descriptions: dict[str, list[ArgumentDescription]]
-    ) -> tuple[
-        list[str], dict[str, dict[str, Any]], list[str]
-    ]:
+    ) -> tuple[list[str], dict[str, dict[str, Any]], list[str]]:
         requested_tasks: list[str] = []
         arguments: dict[str, dict[str, Any]] = {}
         unknown_tasks: list[str] = []
@@ -125,20 +131,24 @@ class ArgumentParser:
                     _ = self.parse_advance(), self.parse_advance()
             else:
                 requested_tasks.append(task_name)
-                arguments[task_name] = self.parse_switches(descriptions[task_name])
-            
+                arguments[task_name] = self.parse_switches(
+                    descriptions[task_name]
+                )
+
             self.parse_advance()
 
         return requested_tasks, arguments, unknown_tasks
 
 
-
-def load_tasks(task_file: str, module_spec_name="__htask_root_tasks__") -> list[Task]:
-    
+def load_tasks(
+    task_file: str, module_spec_name="__htask_root_tasks__"
+) -> list[Task]:
     if not os.path.exists(task_file):
         raise Exception(f"Task file not found! {task_file!r}")
 
-    module_spec = importlib.util.spec_from_file_location(module_spec_name, task_file)
+    module_spec = importlib.util.spec_from_file_location(
+        module_spec_name, task_file
+    )
 
     if module_spec is None:
         raise NotImplementedError()
@@ -155,29 +165,43 @@ def load_tasks(task_file: str, module_spec_name="__htask_root_tasks__") -> list[
     return tasks
 
 
-def run_tasks(context: Context, requested_tasks: list[str], defined_tasks: list[Task], tasks_args: dict[str, dict[str, Any]]):
-    
+def run_tasks(
+    context: Context,
+    requested_tasks: list[str],
+    defined_tasks: list[Task],
+    tasks_args: dict[str, dict[str, Any]],
+):
     for requested_task in requested_tasks:
-        
         for task in defined_tasks:
             if requested_task != task.name:
                 continue
 
-            procedure = partial(task.procedure, context, **tasks_args[task.name])
+            procedure = partial(
+                task.procedure, context, **tasks_args[task.name]
+            )
             procedure()
 
 
-def generate_argument_descriptions_for_tasks(tasks: list[Task]) -> dict[str, list[ArgumentDescription]]:
+def generate_argument_descriptions_for_tasks(
+    tasks: list[Task],
+) -> dict[str, list[ArgumentDescription]]:
     result: dict[str, list[ArgumentDescription]] = {}
 
     for task in tasks:
+        # XXX
+    
+        if task.name not in result.keys():
+            result[task.name] = []
 
         sig = inspect.signature(task.procedure)
 
         for p_index, (p_name, p_obj) in enumerate(sig.parameters.items()):
-
             # TODO(gr3yknigh1): Handle string type annotation [2025/03/16]
-            if p_index == 0 and p_obj.annotation != p_obj.empty and p_obj.annotation is not Context:
+            if (
+                p_index == 0
+                and p_obj.annotation != p_obj.empty
+                and p_obj.annotation is not Context
+            ):
                 raise Exception("First argument should be Context object!")
 
             if p_index == 0:
@@ -192,9 +216,6 @@ def generate_argument_descriptions_for_tasks(tasks: list[Task]) -> dict[str, lis
                     else None
                 )
             )
-            
-            if task.name not in result.keys():
-                result[task.name] = []
 
             result[task.name].append(
                 ArgumentDescription(
@@ -218,7 +239,9 @@ def generate_argument_descriptions_for_tasks(tasks: list[Task]) -> dict[str, lis
 def generate_switches(name: str) -> list[str]:
     result = []
     result.append("{}{}".format(SWITCH_START, name[0]))
-    result.append("{}{}{}".format(SWITCH_START, SWITCH_START, name.replace("_", "-")))
+    result.append(
+        "{}{}{}".format(SWITCH_START, SWITCH_START, name.replace("_", "-"))
+    )
     return result
 
 
@@ -232,12 +255,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "-f", "--file", dest="task_file", type=str, default="tasks.py"
     )
-    parser.add_argument(
-        "-e", dest="echo", type=bool, default=True
-    )
-    parser.add_argument(
-        "-n", "--dry-run", dest="dry_run", default=False
-    )
+    parser.add_argument("-e", dest="echo", type=bool, default=True)
+    parser.add_argument("-n", "--dry-run", dest="dry_run", default=False)
 
     args = parser.parse_args(argv)
     working_dir = args.get("working_dir")
@@ -247,10 +266,10 @@ def main(argv: list[str] | None = None) -> int:
     assert task_file
 
     dry_run = args.get("dry_run")
-    assert(dry_run is not None)
+    assert dry_run is not None
 
     echo = args.get("echo")
-    assert(echo is not None)
+    assert echo is not None
 
     if working_dir:
         os.chdir(working_dir)
@@ -270,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     context = Context(
+        root=working_dir,
         config=Config(
             dry_run=dry_run,
             echo=echo,
@@ -282,6 +302,18 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main(["htask", "build"]))
+    raise SystemExit(main(sys.argv))
+    raise SystemExit(main(["htask", "build", "--reconfigure"]))
     raise SystemExit(main(["htask", "-C", "examples/03_basic_project"]))
-    raise SystemExit(main(["htask", "-C", "examples/03_basic_project", "build", "-c", "Release"]))
+    raise SystemExit(
+        main(
+            [
+                "htask",
+                "-C",
+                "examples/03_basic_project",
+                "build",
+                "-c",
+                "Release",
+            ]
+        )
+    )

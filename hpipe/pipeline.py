@@ -120,7 +120,7 @@ define_job = partial(orphan_pipeline.define_job, stage="default")
 
 def execute_job(job: Job, *, dry_run=False) -> None:
 
-    context = Context(job=job, dry_run=dry_run)
+    context = Context(dry_run=dry_run)
 
     try:
         job.handler(context)

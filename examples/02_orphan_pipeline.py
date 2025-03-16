@@ -1,5 +1,5 @@
-from hpipe import define_job, Job
+from hpipe import define_job, Context
 
 @define_job()
-def echo(j: Job):
-    j.run("echo 'Hi from orthan pipeline!'")
+def echo(c: Context):
+    c.run("echo 'Hi from orthan pipeline!'")
