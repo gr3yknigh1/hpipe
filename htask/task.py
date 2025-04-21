@@ -8,6 +8,7 @@ from copy import deepcopy
 import subprocess
 import shlex
 import os
+import sys
 
 __all__ = ("Task", "define_task")
 
@@ -107,6 +108,9 @@ class Context:
             pass
 
     def echo(self, msg: str) -> Result:
+        if sys.platform == "win32":
+            # NOTE(gr3yknigh1): Need no quotes in cmd.exe shell [2025/04/06]
+            return self.run(f"echo {msg}")
         return self.run(f"echo {msg!r}")
 
     def mkdir(self, dir: str) -> Result:
