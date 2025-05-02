@@ -9,3 +9,8 @@ build
 .tox
 .ruff_cache
 .mypy_cache
+
+#
+# Vim
+#
+*.swp
