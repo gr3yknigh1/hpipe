@@ -38,7 +38,7 @@ def extract_env_from_vcvars(c: Context, arch="x64", vcvars: str | None = None, e
     if extract_vars is None:
         extract_vars = DEFAULT_VC_BOOSTRAP_VARS
 
-    result = c.run(f"'{vcvars}' {arch} && set", capture_output=True)
+    result = c.run(f"{c.quote(vcvars)} {arch} && set", capture_output=True)
 
     if result.output is None:
         return {}

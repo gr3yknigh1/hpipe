@@ -41,6 +41,14 @@ class Context:
     def quote(self, s: str) -> str:
         return f'"{s}"'
 
+    def is_quoted(self, s: str) -> str:
+        return "\"" in (s[0], s[-1])
+
+    def dequote(self, s: str) -> str:
+        if self.is_quoted(s):
+            return s[1:-1]
+        return s
+
     def exists(self, p: str):
         return os.path.exists(p)
 
@@ -55,9 +63,8 @@ class Context:
         capture_output=False,
         env: dict[str, Any] | None = None,
     ) -> Result:
-        command = command.replace("\\", "/") # XXX
-        parts = [*self.prefixes, *shlex.split(command)]
-        # TODO(gr3yknigh1): Replace shlex.split with custom splitter, because shlex only suitable for POSIX shells [2025/03/16]
+        parts = [*self.prefixes, *shlex.split(command, posix=sys.platform != "win32")]
+        parts[0] = self.dequote(parts[0])
 
         if env is None:
             env = {}
@@ -84,7 +91,11 @@ class Context:
                     stdout.decode(encoding) if stdout is not None else None
                 )
             else:
-                process = subprocess.Popen(parts, shell=True, env=env)
+                process = subprocess.Popen(
+                    parts, 
+                    shell=True,
+                    env=env
+                )
                 process.wait(timeout=timeout)
 
             return_code = process.returncode
