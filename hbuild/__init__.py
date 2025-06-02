@@ -281,28 +281,28 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
 
         libraries.extend([dependency.get_artefact_path(conf) for dependency in target.dependencies])
 
+
+        output = target.get_artefact_path(conf)
+        output_filename, _ = splitext(output)
+
+        compile_flags = []
+        link_flags = []
+
+        if conf.build_type == BuildType.DEBUG:
+            # TODO(gr3yknigh1): Move to MSVC interface (msvc.py) [2025/06/02]
+            compile_flags.extend([
+                "/Zi",
+            ])
+            link_flags.extend([
+                "/DEBUG:FULL",
+            ])
+
         if target.kind == TargetKind.EXECUTABLE:
-
-            output = target.get_artefact_path(conf)
-            output_filename, _ = splitext(output)
-
-            compile_flags = []
-            link_flags = []
-
-            if conf.build_type == BuildType.DEBUG:
-                # TODO(gr3yknigh1): Move to MSVC interface (msvc.py) [2025/06/02]
-                compile_flags.extend([
-                    f"/Fd:{output_filename}.pdb"
-                    "/Zi",
-                ])
-                link_flags.extend([
-                    "/DEBUG:FULL",
-                ])
-
             result = msvc.compile(
                 c, [],
                 output=output,
                 output_kind=msvc.OutputKind.EXECUTABLE,
+                output_debug_info_path=f"{output_filename}.pdb",
                 compile_flags=compile_flags,
                 link_flags=link_flags,
                 libs=[*object_files, *libraries],
@@ -320,6 +320,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
                 c, object_files,
                 output=target.get_artefact_path(conf),
                 output_kind=msvc.OutputKind.DYNAMIC_LIBRARY,
+                output_debug_info_path=f"{output_filename}.pdb",
                 libraries=libraries,
                 env=conf.environment,
             )

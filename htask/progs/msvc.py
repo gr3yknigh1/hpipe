@@ -84,6 +84,7 @@ def compile(
     *,
     output: str,
     output_kind=OutputKind.EXECUTABLE,
+    output_debug_info_path: str | None = None,
     libs: list[str] | None=None,
     defines: dict[str, Any] | None=None,
     includes: list[str] | None=None,
@@ -125,6 +126,9 @@ def compile(
     if is_dll:
         link_flags.append("/DLL")
 
+    if output_debug_info_path is not None:
+        compile_flags.append(f"/Fd:{output_debug_info_path}")
+
     compile_flags_formatted = " ".join(compile_flags)
     defines_formatted = format_defines(defines)
     includes_formatted = format_includes(includes)
@@ -143,12 +147,14 @@ def compile(
     else:
         raise NotImplementedError("")
 
-    options = " ".join([
+    options = [
         compile_flags_formatted, defines_formatted, sources_formatted, output_formatted, includes_formatted, libs_formatted, link_flags_formatted
-    ])
+    ]
+
+    options_formatted = " ".join(options)
 
     return c.run(
-        f"cl.exe /nologo {options}",
+        f"cl.exe /nologo {options_formatted}",
         env=env, **kw
     )
 
@@ -159,6 +165,7 @@ def link(
     *,
     output: str,
     output_kind=OutputKind.EXECUTABLE,
+    output_debug_info_path: str | None = None,
     libraries: list[str] | None = None,
     env: dict[str, str] | None = None,
     kw: dict[str, Any] | None=None
@@ -176,14 +183,20 @@ def link(
     object_files_formatted = " ".join(object_files)
     libraries_formatted  = " ".join(libraries)
 
-    options = " ".join([object_files_formatted, libraries_formatted])
+    options = [object_files_formatted, libraries_formatted]
+
+
+    if output_debug_info_path is not None and output_kind != OutputKind.STATIC_LIBRARY:
+        options.append(f"/Fd:{output_debug_info_path}")
+
+    options_formatted = " ".join(options)
 
     if output_kind == OutputKind.EXECUTABLE:
-        result = c.run(f"link.exe /nologo {options}", env=env, **kw)
+        result = c.run(f"link.exe /nologo {options_formatted}", env=env, **kw)
     elif output_kind == OutputKind.STATIC_LIBRARY:
-        result = c.run(f"lib.exe /nologo /OUT:{output} {options}", env=env, **kw)
+        result = c.run(f"lib.exe /nologo /OUT:{output} {options_formatted}", env=env, **kw)
     elif output_kind == OutputKind.DYNAMIC_LIBRARY:
-        result = c.run(f"link.exe /nologo /DLL /OUT:{output} {options}", env=env, **kw)
+        result = c.run(f"link.exe /nologo /DLL /OUT:{output} {options_formatted}", env=env, **kw)
     else:
         raise NotImplemented("...")
     return result

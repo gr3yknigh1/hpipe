@@ -85,6 +85,7 @@ class Context:
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     env=env,
+                    cwd=self.root,
                 )
                 stdout, _ = process.communicate(timeout=timeout)
                 output = (
@@ -94,7 +95,8 @@ class Context:
                 process = subprocess.Popen(
                     parts, 
                     shell=True,
-                    env=env
+                    env=env,
+                    cwd=self.root,
                 )
                 process.wait(timeout=timeout)
 
@@ -115,6 +117,13 @@ class Context:
 
         try:
             yield Context(self.root, prefixes, self.config)
+        finally:
+            pass
+
+    @contextmanager
+    def cd(self, cd: str):
+        try:
+            yield Context(cd, self.prefixes, self.config)
         finally:
             pass
 

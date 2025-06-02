@@ -61,13 +61,14 @@ def main(argv: list[str] | None = None) -> int:
     sys.modules[module_spec_name] = module
     module_spec.loader.exec_module(module)
 
-    context = Context(root=working_dir)
+    c = Context(root=working_dir)
 
     # TODO(gr3yknigh1): Expose more configuration stuff in command-line [2025/06/01]
-    conf = configure(context, prefix=join(working_dir, "build")) 
+    conf = configure(c, prefix=join(working_dir, "build")) 
 
+    #with c.cd(conf.get_output_folder()) as c:
     for target in _targets:
-        compile_target(context, conf=conf, target=target)
+        compile_target(c, conf=conf, target=target)
 
     return 0
 
