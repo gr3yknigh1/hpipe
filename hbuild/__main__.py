@@ -4,12 +4,11 @@ from os.path import join
 import argparse 
 import sys
 import os
-import importlib
 
 from htask import Context
 
 from hbuild import _targets
-from hbuild import compile_target, configure
+from hbuild import compile_project
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -41,34 +40,10 @@ def main(argv: list[str] | None = None) -> int:
     echo = getattr(args, "echo", None)
     assert echo is not None
 
-    if working_dir:
-        os.chdir(working_dir)
-
-    module_spec_name = "__hbuild_build_file__"
-    
-    module_spec = importlib.util.spec_from_file_location(
-        module_spec_name, build_file
-    )
-
-    if module_spec is None:
-        raise NotImplementedError()
-
-    module = importlib.util.module_from_spec(module_spec)
-
-    if module_spec.loader is None:
-        raise NotImplementedError()
-
-    sys.modules[module_spec_name] = module
-    module_spec.loader.exec_module(module)
 
     c = Context(root=working_dir)
 
-    # TODO(gr3yknigh1): Expose more configuration stuff in command-line [2025/06/01]
-    conf = configure(c, prefix=join(working_dir, "build")) 
-
-    #with c.cd(conf.get_output_folder()) as c:
-    for target in _targets:
-        compile_target(c, conf=conf, target=target)
+    compile_project(c, build_file=build_file, prefix=join(working_dir, "build"))
 
     return 0
 

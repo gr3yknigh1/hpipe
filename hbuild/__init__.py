@@ -8,6 +8,7 @@ from copy import copy
 from os import makedirs
 from os.path import exists, isabs, join, splitext, basename
 import sys
+import importlib
 
 
 from htask import Context
@@ -20,6 +21,7 @@ __all__ = (
     "add_library",
     "add_executable",
     "compile_target",
+    "compile_project",
     "Configuration",
     "configure",
     "BuildType",
@@ -335,3 +337,29 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
     target.state = TargetState.ALREADY_COMPILED
 
     return result
+
+
+def compile_project(c: Context, *, build_file: str, prefix: str) -> Result:
+
+    module_spec_name = "__hbuild_build_file__"
+    
+    module_spec = importlib.util.spec_from_file_location(
+        module_spec_name, build_file
+    )
+
+    if module_spec is None:
+        raise NotImplementedError()
+
+    module = importlib.util.module_from_spec(module_spec)
+
+    if module_spec.loader is None:
+        raise NotImplementedError()
+
+    sys.modules[module_spec_name] = module
+    module_spec.loader.exec_module(module)
+
+    # TODO(gr3yknigh1): Expose more configuration stuff in command-line [2025/06/01]
+    conf = configure(c, prefix=prefix) 
+
+    for target in _targets:
+        compile_target(c, conf=conf, target=target)
