@@ -8,6 +8,7 @@ import os.path
 
 from htask import Context
 
+
 __all__ = ("assemble",)
 
 
@@ -15,16 +16,17 @@ if sys.platform == "win32":
     # TODO: Check for bitness
     DEFAULT_OUTPUT_FORMAT = "win64"
     DEFAULT_DEBUG_FORMAT = "cv8"
-
     OBJECT_FILE_EXT = "obj"
+
 elif sys.platform == "linux":
     # TODO: Check for bitness
     DEFAULT_OUTPUT_FORMAT = "elf64"
     DEFAULT_DEBUG_FORMAT = "dwarf"
     OBJECT_FILE_EXT = "o"
+
 else:
     # TODO: Make better exception
-    raise Exception(f"Unsupported platform: {sys.platform!r}")
+    raise Exception(f"Unsupported platform: {sys.platform!r}.")
 
 
 def assemble(

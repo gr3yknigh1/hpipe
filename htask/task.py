@@ -10,7 +10,7 @@ import shlex
 import os
 import sys
 
-__all__ = ("Task", "define_task")
+__all__ = ("Task", "define_task", "Result", "Config")
 
 
 @dataclass
@@ -72,7 +72,7 @@ class Context:
         env = {**os.environ, **env}
 
         if self.config.dry_run or self.config.echo:
-            print(f"> {' '.join(parts)}")
+            print(f"> {' '.join(parts)}", flush=True)
 
         output: str | None = None
         return_code = 0

@@ -4,6 +4,7 @@ from typing import Any
 from htask.task import Task
 from htask.task import Context
 from htask.task import Config
+from htask.task import Result
 from htask.task import define_task
 
 __all__ = ("Task", "define_task", "Context", "Config", "load_env", "save_env", "is_file_busy")
