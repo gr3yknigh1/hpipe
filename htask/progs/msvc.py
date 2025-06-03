@@ -219,10 +219,8 @@ def compile(
     
     if output_kind == OutputKind.OBJECT_FILE:
         output_formatted = f"/Fo:{output}"
-    elif output_kind == OutputKind.EXECUTABLE:
-        output_formatted = f"/Fe:{output}"
     else:
-        raise NotImplementedError("")
+        output_formatted = f"/Fe:{output}"
 
     options = [
         compile_flags_formatted, defines_formatted, sources_formatted, output_formatted, includes_formatted, libs_formatted, link_flags_formatted
@@ -262,7 +260,6 @@ def link(
 
     options = [object_files_formatted, libraries_formatted]
 
-
     if output_debug_info_path is not None and output_kind != OutputKind.STATIC_LIBRARY:
         options.append(f"/Fd:{output_debug_info_path}")
 
@@ -273,7 +270,7 @@ def link(
     elif output_kind == OutputKind.STATIC_LIBRARY:
         result = c.run(f"lib.exe /nologo /OUT:{output} {options_formatted}", env=env, **kw)
     elif output_kind == OutputKind.DYNAMIC_LIBRARY:
-        result = c.run(f"link.exe /nologo /DLL /OUT:{output} {options_formatted}", env=env, **kw)
+        result = c.run(f"cl.exe /nologo /LD /Fe:{output} {options_formatted}", env=env, **kw)
     else:
         raise NotImplementedError("...")
 

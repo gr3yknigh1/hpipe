@@ -512,14 +512,17 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
                 env=conf.environment,
             )
         elif target.kind == TargetKind.DYNAMIC_LIBRARY:
-            result = msvc.link(
+            result = msvc.compile(
                 c,
                 object_files,
                 output=target.get_artefact_path(conf),
                 output_kind=msvc.OutputKind.DYNAMIC_LIBRARY,
                 output_debug_info_path=f"{output_filename}.pdb",
-                libraries=libraries,
+                debug_info_mode=debug_info_mode,
+                produce_pdb=conf.build_type == BuildType.DEBUG,
+                libs=libraries,
                 env=conf.environment,
+                is_dll=True,
             )
         else:
             raise Exception(f"Unhandled kind of targets! kind={target.kind!r}.")
