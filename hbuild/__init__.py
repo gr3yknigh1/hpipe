@@ -240,32 +240,23 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
                 source_path = source_path.replace("/", "\\")
                 target.includes = [include.replace("/", "\\") for include in target.includes]
 
-            compile_flags = ["/c",]
-            link_flags = []
-
-            if conf.build_type == BuildType.DEBUG:
-                compile_flags.extend([
-                    "/Od",          # Disables optimizations.
-                    "/MTd",         # Link with static debug runtime.
-                    "/Zi",
-                ])
-
-            if conf.build_type == BuildType.RELEASE:
-                compile_flags.extend([
-                    "/O2",   # Maximum optimizations.
-                    "/MT",   # Link with static release runtime.
-                ])
+            # TODO(gr3yknigh1): Expose this option via platform-specific API configurations [2025/06/03]
+            runtime_library = (
+                msvc.RuntimeLibrary.STATIC_DEBUG if conf.build_type == BuildType.DEBUG else msvc.RuntimeLibrary.STATIC
+            )
 
             result = msvc.compile(
                 c, [source_path],
                 output=object_file,
+                only_compilation=True,
+                produce_pdb=conf.build_type == BuildType.DEBUG,
                 includes=target.includes,
-                compile_flags=compile_flags,
-                link_flags=link_flags,
                 defines=target.defines,
                 output_kind=msvc.OutputKind.OBJECT_FILE,
+                optimization_level=msvc.OptimizationLevel.DISABLED if conf.build_type == BuildType.DEBUG else msvc.OptimizationLevel.MAXIMIZE_SPEED,
                 language_standard=msvc.LanguageStandard.C_LATEST if source.language == Language.C else msvc.LanguageStandard.CXX_14,
                 debug_info_mode=msvc.DebugInfoMode.FULL if conf.build_type == BuildType.DEBUG else msvc.DebugInfoMode.NONE,
+                runtime_library=runtime_library,
                 env=conf.environment,
             )
 

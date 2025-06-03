@@ -1,7 +1,7 @@
 from __future__ import annotations
 from typing import Any
 
-from enum import StrEnum
+from enum import StrEnum, IntEnum, auto
 
 from htask import Context, Result
 
@@ -71,11 +71,13 @@ def format_includes(includes: list[str]) -> str:
     )
     return result
 
+
 class OutputKind(StrEnum):
     EXECUTABLE="executable"
     OBJECT_FILE="object_file"
     STATIC_LIBRARY="static_library"
     DYNAMIC_LIBRARY="dynamic_library"
+
 
 class DebugInfoMode(StrEnum):
     NONE = "NONE"
@@ -92,6 +94,23 @@ class LanguageStandard(StrEnum):
     C_11 = "c11"
     C_17 = "c17"
     C_LATEST = "clatest"
+
+
+class RuntimeLibrary(IntEnum):
+    STATIC = auto()
+    STATIC_DEBUG = auto()
+    DYNAMIC = auto()
+    DYNAMIC_DEBUG = auto()
+
+
+# TODO(gr3yknigh1): Expose more options to the user.
+# See: https://learn.microsoft.com/en-us/cpp/build/reference/o1-o2-minimize-size-maximize-speed?view=msvc-170#remarks
+# [2025/06/03]
+    
+class OptimizationLevel(IntEnum):
+    DISABLED = auto()
+    MINIMIZE_SIZE = auto()
+    MAXIMIZE_SPEED = auto()
     
 
 def compile(
@@ -108,8 +127,12 @@ def compile(
     link_flags: list[str] | None=None,
     env: dict[str, Any] | None=None,
     only_preprocessor=False,
+    only_compilation=False,
+    produce_pdb=False,
     unicode_support=False,
+    optimization_level: OptimizationLevel | None = None,
     language_standard: LanguageStandard | None = None,
+    runtime_library: RuntimeLibrary | None = None,
 
     # TODO(gr3yknigh1): Refactor linker flags out from this function [2025/06/03]
     debug_info_mode: DebugInfoMode | None = None,
@@ -140,11 +163,39 @@ def compile(
             _UNICODE=1,
         ))
 
+    if only_compilation:
+        compile_flags.append("/c")
+
     if only_preprocessor:
         compile_flags.append("/P")
 
+    if produce_pdb:
+        compile_flags.append("/Zi")
+
     if language_standard is not None:
         compile_flags.append(f"/std:{language_standard!s}")
+
+    if runtime_library is not None:
+
+        if runtime_library == RuntimeLibrary.STATIC:
+            compile_flags.append("/MT")
+        elif runtime_library == RuntimeLibrary.STATIC_DEBUG:
+            compile_flags.append("/MTd")
+        elif runtime_library == RuntimeLibrary.DYNAMIC:
+            compile_flags.append("/MD")
+        elif runtime_library == RuntimeLibrary.DYNAMIC_DEBUG:
+            compile_flags.append("/MDd")
+        else:
+            raise NotImplementedError("...")
+
+    if optimization_level is not None:
+
+        if optimization_level == OptimizationLevel.DISABLED:
+            compile_flags.append("/Od")
+        elif optimization_level == OptimizationLevel.MINIMIZE_SIZE:
+            compile_flags.append("/O1")
+        elif optimization_level == OptimizationLevel.MAXIMIZE_SPEED:
+            compile_flags.append("/O2")
 
     if is_dll:
         link_flags.append("/DLL")
