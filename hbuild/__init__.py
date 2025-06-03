@@ -28,6 +28,7 @@ __all__ = (
     "Compiler",
     "target_includes",
     "target_macros",
+    "target_links",
 )
 
 
@@ -108,6 +109,8 @@ class SourceFile:
 class TargetProperties:
     includes: list[str] = field(default_factory=list)
     macros: dict[str, str] = field(default_factory=dict)
+    links: list[Target] = field(default_factory=list)
+
 
 class Access(IntEnum):
     PRIVATE = auto()
@@ -122,7 +125,6 @@ class Target:
 
     sources: list[SourceFile] = field(default_factory=list)
 
-    dependencies: list[Target] = field(default_factory=list)
     properties: dict[Access, TargetProperties] = field(default_factory=dict)
 
     def __post_init__(self):
@@ -213,6 +215,11 @@ def target_macros(target: Target, access=Access.PRIVATE, *, macros: dict[str, st
     target.properties[access].macros.update(**macros)
 
 
+def target_links(target, access=Access.PRIVATE, *, links: list[Target]) -> None:
+    assert len(links) > 0
+    target.properties[access].links.extend(links)
+
+
 def add_target(
     name: str, kind: TargetKind, sources: list[str] | None = None
 ) -> Target:
@@ -247,8 +254,16 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
     if target.state == TargetState.ALREADY_COMPILED:
         return
 
-    for dependency in target.dependencies:
-        compile_target(c, conf=conf, target=dependency)
+    libraries = []
+    includes = []
+    macros = {}
+
+    for _, props in target.properties.items():
+        for link_target in props.links:
+            compile_target(c, conf=conf, target=link_target)
+
+            libraries.append(link_target.get_artefact_path(conf))
+
 
     sources = []
     for source in target.sources:
@@ -265,9 +280,6 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
     target_output_prefix = join(conf.get_output_folder(), target.name)
     makedirs(target_output_prefix, exist_ok=True)
 
-    includes = []
-    macros = {}
-
     for _, properties in target.properties.items():
         includes.extend(properties.includes)
         macros.update(**properties.macros)
@@ -275,7 +287,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
 
     if conf.compiler == Compiler.MSVC:
         # TODO(gr3yknigh1): Expose to the user the libraries which he want's to link [2025/06/02]
-        libraries = ["kernel32.lib", "user32.lib", "gdi32.lib"]
+        libraries.extend(["kernel32.lib", "user32.lib", "gdi32.lib"])
         object_files: list[str] = []
 
         if sys.platform == "win32":
@@ -340,13 +352,6 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
                 )
 
             object_files.append(object_file)
-
-        libraries.extend(
-            [
-                dependency.get_artefact_path(conf)
-                for dependency in target.dependencies
-            ]
-        )
 
         output = target.get_artefact_path(conf)
         output_filename, _ = splitext(output)
