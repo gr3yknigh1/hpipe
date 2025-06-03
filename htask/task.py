@@ -41,7 +41,7 @@ class Context:
     def quote(self, s: str) -> str:
         return f'"{s}"'
 
-    def is_quoted(self, s: str) -> str:
+    def is_quoted(self, s: str) -> bool:
         return "\"" in (s[0], s[-1])
 
     def dequote(self, s: str) -> str:

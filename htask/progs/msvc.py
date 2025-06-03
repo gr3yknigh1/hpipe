@@ -275,5 +275,6 @@ def link(
     elif output_kind == OutputKind.DYNAMIC_LIBRARY:
         result = c.run(f"link.exe /nologo /DLL /OUT:{output} {options_formatted}", env=env, **kw)
     else:
-        raise NotImplemented("...")
+        raise NotImplementedError("...")
+
     return result

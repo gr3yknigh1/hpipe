@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from os.path import join
-import argparse 
+import argparse
 import sys
 import os
 
 from htask import Context
 
-from hbuild import _targets
 from hbuild import compile_project
 
 
@@ -41,7 +40,9 @@ def main(argv: list[str] | None = None) -> int:
     assert echo is not None
 
     c = Context(root=working_dir)
-    compile_project(c, build_file=build_file, prefix=join(working_dir, "build"))
+    compile_project(
+        c, build_file=build_file, prefix=join(working_dir, "build")
+    )
 
     return 0
 

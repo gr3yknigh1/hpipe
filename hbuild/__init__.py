@@ -4,11 +4,10 @@ from enum import StrEnum
 from enum import IntEnum
 from enum import auto
 from dataclasses import dataclass, field
-from copy import copy
 from os import makedirs
 from os.path import exists, isabs, join, splitext, basename
 import sys
-import importlib
+import importlib.util
 
 
 from htask import Context
@@ -30,7 +29,7 @@ __all__ = (
 )
 
 
-_targets = []
+_targets: list[Target] = []
 
 
 class BuildType(StrEnum):
@@ -50,7 +49,7 @@ class Bitness(StrEnum):
 _ARCH_TO_BITNESS = {
     Architecture.X86_64: Bitness.X64,
 }
-    
+
 
 def arch_to_bitness(arch: Architecture) -> Bitness | None:
     return _ARCH_TO_BITNESS.get(arch, None)
@@ -60,6 +59,7 @@ class TargetKind(IntEnum):
     EXECUTABLE = auto()
     STATIC_LIBRARY = auto()
     DYNAMIC_LIBRARY = auto()
+
 
 class TargetState(IntEnum):
     NOT_COMPILED = auto()
@@ -76,8 +76,12 @@ class Compiler(StrEnum):
 
 
 _EXT_TO_LANGUAGE = {
-    "C": (".c", ".h",),
+    "C": (
+        ".c",
+        ".h",
+    ),
 }
+
 
 class Language(StrEnum):
     C = "C"
@@ -85,7 +89,6 @@ class Language(StrEnum):
 
     @classmethod
     def guess_from_ext(cls, path: str) -> Language | None:
-
         _, file_ext = splitext(path)
         for lang, exts in _EXT_TO_LANGUAGE.items():
             if file_ext in exts:
@@ -103,16 +106,14 @@ class SourceFile:
 class Target:
     name: str
     kind: TargetKind
-    sources: list[InputFile] = field(default_factory=list)
+    sources: list[SourceFile] = field(default_factory=list)
     dependencies: list[Target] = field(default_factory=list)
     state: TargetState = field(default=TargetState.NOT_COMPILED)
     includes: list[str] = field(default_factory=list)
     defines: dict[str, str] = field(default_factory=dict)
 
     def get_artefact_ext(self, conf: Configuration) -> str:
-
         if conf.compiler == Compiler.MSVC:
-
             if self.kind == TargetKind.EXECUTABLE:
                 return ".exe"
 
@@ -134,9 +135,8 @@ def configure(
     prefix: str,
     compiler=Compiler.detect_compiler(),
     build_type=BuildType.DEBUG,
-    architecture=Architecture.X86_64
+    architecture=Architecture.X86_64,
 ) -> Configuration:
-
     conf = Configuration(
         prefix=prefix,
         compiler=compiler,
@@ -148,7 +148,9 @@ def configure(
     makedirs(output, exist_ok=True)
 
     if conf.compiler == Compiler.MSVC:
-        env = msvc.extract_env_from_vcvars(c, arch=arch_to_bitness(architecture))
+        env = msvc.extract_env_from_vcvars(
+            c, arch=arch_to_bitness(architecture)
+        )
         conf.environment.update(env)
 
     return conf
@@ -166,9 +168,10 @@ class Configuration:
     def get_output_folder(self):
         return join(
             self.prefix,
-            arch_to_bitness(self.architecture), 
+            arch_to_bitness(self.architecture),
             self.build_type,
         )
+
 
 def add_library(name: str, sources: list[str] | None = None, *, dynamic=False):
     if dynamic:
@@ -180,26 +183,36 @@ def add_executable(name: str, sources: list[str] | None = None):
     return add_target(name, TargetKind.EXECUTABLE, sources)
 
 
-def add_target(name: str, kind: TargetKind, sources: list[str] | None=None) -> Target:
+def add_target(
+    name: str, kind: TargetKind, sources: list[str] | None = None
+) -> Target:
 
     if sources is None:
         sources = []
 
-    source_files = [
-        SourceFile(
-            path=source, language=Language.guess_from_ext(source)
-        ) for source in sources
-    ]
+    source_files = []
+
+    for source in sources:
+        language = Language.guess_from_ext(source)
+
+        if language is None:
+            raise Exception("Failed to guess language via extension.")  # XXX
+
+        source_files.append(SourceFile(path=source, language=language))
+
 
     target = Target(name=name, kind=kind, sources=source_files)
 
     for t in _targets:
         if t.name == target.name:
-            raise Exception(f"Target with the same name was already defined: {t!r}.")
+            raise Exception(
+                f"Target with the same name was already defined: {t!r}."
+            )
 
     _targets.append(target)
 
     return target
+
 
 def compile_target(c: Context, *, conf: Configuration, target: Target):
     if target.state == TargetState.ALREADY_COMPILED:
@@ -216,16 +229,47 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
 
     lost_sources = [source for source in sources if not exists(source.path)]
     if len(lost_sources) > 0:
-        raise Exception(f"Non-existing sources was found! lost_sources={lost_sources!r}")
+        raise Exception(
+            f"Non-existing sources was found! lost_sources={lost_sources!r}"
+        )
 
     target_output_prefix = join(conf.get_output_folder(), target.name)
     makedirs(target_output_prefix, exist_ok=True)
 
     if conf.compiler == Compiler.MSVC:
-
         # TODO(gr3yknigh1): Expose to the user the libraries which he want's to link [2025/06/02]
         libraries = ["kernel32.lib", "user32.lib", "gdi32.lib"]
         object_files: list[str] = []
+
+        if sys.platform == "win32":
+            target.includes = [
+                include.replace("/", "\\") for include in target.includes
+            ]
+
+        # TODO(gr3yknigh1): Expose this option via platform-specific API configurations [2025/06/03]
+        runtime_library = (
+            msvc.RuntimeLibrary.STATIC_DEBUG
+            if conf.build_type == BuildType.DEBUG
+            else msvc.RuntimeLibrary.STATIC
+        )
+
+        language_standard = (
+            msvc.LanguageStandard.C_LATEST
+            if source.language == Language.C
+            else msvc.LanguageStandard.CXX_14
+        )
+
+        debug_info_mode = (
+            msvc.DebugInfoMode.FULL
+            if conf.build_type == BuildType.DEBUG
+            else msvc.DebugInfoMode.NONE
+        )
+
+        optimization_level = (
+            msvc.OptimizationLevel.DISABLED
+            if conf.build_type == BuildType.DEBUG
+            else msvc.OptimizationLevel.MAXIMIZE_SPEED
+        )
 
         for source in sources:
             source_name, source_ext = splitext(basename(source.path))
@@ -238,35 +282,36 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
 
             if sys.platform == "win32":
                 source_path = source_path.replace("/", "\\")
-                target.includes = [include.replace("/", "\\") for include in target.includes]
-
-            # TODO(gr3yknigh1): Expose this option via platform-specific API configurations [2025/06/03]
-            runtime_library = (
-                msvc.RuntimeLibrary.STATIC_DEBUG if conf.build_type == BuildType.DEBUG else msvc.RuntimeLibrary.STATIC
-            )
 
             result = msvc.compile(
-                c, [source_path],
+                c,
+                [source_path],
                 output=object_file,
                 only_compilation=True,
                 produce_pdb=conf.build_type == BuildType.DEBUG,
                 includes=target.includes,
                 defines=target.defines,
                 output_kind=msvc.OutputKind.OBJECT_FILE,
-                optimization_level=msvc.OptimizationLevel.DISABLED if conf.build_type == BuildType.DEBUG else msvc.OptimizationLevel.MAXIMIZE_SPEED,
-                language_standard=msvc.LanguageStandard.C_LATEST if source.language == Language.C else msvc.LanguageStandard.CXX_14,
-                debug_info_mode=msvc.DebugInfoMode.FULL if conf.build_type == BuildType.DEBUG else msvc.DebugInfoMode.NONE,
+                optimization_level=optimization_level,
+                language_standard=language_standard,
+                debug_info_mode=debug_info_mode,
                 runtime_library=runtime_library,
                 env=conf.environment,
             )
 
             if result.return_code != 0:
-                raise Exception(f"Failed to compile! return_code={result.return_code!r}")
+                raise Exception(
+                    f"Failed to compile! return_code={result.return_code!r}"
+                )
 
             object_files.append(object_file)
 
-        libraries.extend([dependency.get_artefact_path(conf) for dependency in target.dependencies])
-
+        libraries.extend(
+            [
+                dependency.get_artefact_path(conf)
+                for dependency in target.dependencies
+            ]
+        )
 
         output = target.get_artefact_path(conf)
         output_filename, _ = splitext(output)
@@ -277,16 +322,21 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
         if conf.build_type == BuildType.DEBUG:
             # TODO(gr3yknigh1): Move to MSVC interface (msvc.py) [2025/06/02]
 
-            compile_flags.extend([
-                "/Zi",
-            ])
-            link_flags.extend([
-                "/DEBUG:FULL",
-            ])
+            compile_flags.extend(
+                [
+                    "/Zi",
+                ]
+            )
+            link_flags.extend(
+                [
+                    "/DEBUG:FULL",
+                ]
+            )
 
         if target.kind == TargetKind.EXECUTABLE:
             result = msvc.compile(
-                c, [],
+                c,
+                [],
                 output=output,
                 output_kind=msvc.OutputKind.EXECUTABLE,
                 output_debug_info_path=f"{output_filename}.pdb",
@@ -297,14 +347,16 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
             )
         elif target.kind == TargetKind.STATIC_LIBRARY:
             result = msvc.link(
-                c, object_files,
+                c,
+                object_files,
                 output=target.get_artefact_path(conf),
                 output_kind=msvc.OutputKind.STATIC_LIBRARY,
                 env=conf.environment,
             )
         elif target.kind == TargetKind.DYNAMIC_LIBRARY:
             result = msvc.link(
-                c, object_files,
+                c,
+                object_files,
                 output=target.get_artefact_path(conf),
                 output_kind=msvc.OutputKind.DYNAMIC_LIBRARY,
                 output_debug_info_path=f"{output_filename}.pdb",
@@ -315,7 +367,9 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
             raise NotImplementedError("...")
 
         if result.return_code != 0:
-            raise Exception(f"Failed to compile! return_code={result.return_code!r}")
+            raise Exception(
+                f"Failed to compile! return_code={result.return_code!r}"
+            )
     else:
         raise NotImplementedError("Support only MSVC for now...")
 
@@ -332,10 +386,9 @@ def compile_project(
     compiler=Compiler.detect_compiler(),
     build_type=BuildType.DEBUG,
     architecture=Architecture.X86_64,
-) -> Result:
-
+) -> None:
     module_spec_name = "__hbuild_build_file__"
-    
+
     module_spec = importlib.util.spec_from_file_location(
         module_spec_name, build_file
     )
