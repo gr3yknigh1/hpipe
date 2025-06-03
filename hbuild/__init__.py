@@ -26,6 +26,8 @@ __all__ = (
     "BuildType",
     "Architecture",
     "Compiler",
+    "target_includes",
+    "target_macros",
 )
 
 
@@ -103,17 +105,35 @@ class SourceFile:
 
 
 @dataclass
+class TargetProperties:
+    includes: list[str] = field(default_factory=list)
+    macros: dict[str, str] = field(default_factory=dict)
+
+class Access(IntEnum):
+    PRIVATE = auto()
+    PUBLIC = auto()
+
+
+@dataclass
 class Target:
     name: str
     kind: TargetKind
-    sources: list[SourceFile] = field(default_factory=list)
-    dependencies: list[Target] = field(default_factory=list)
     state: TargetState = field(default=TargetState.NOT_COMPILED)
-    includes: list[str] = field(default_factory=list)
-    defines: dict[str, str] = field(default_factory=dict)
+
+    sources: list[SourceFile] = field(default_factory=list)
+
+    dependencies: list[Target] = field(default_factory=list)
+    properties: dict[Access, TargetProperties] = field(default_factory=dict)
+
+    def __post_init__(self):
+        for access in Access:
+            self.properties[access] = TargetProperties()
+
 
     def get_artefact_ext(self, conf: Configuration) -> str:
+
         if conf.compiler == Compiler.MSVC:
+
             if self.kind == TargetKind.EXECUTABLE:
                 return ".exe"
 
@@ -183,6 +203,16 @@ def add_executable(name: str, sources: list[str] | None = None):
     return add_target(name, TargetKind.EXECUTABLE, sources)
 
 
+def target_includes(target: Target, access=Access.PRIVATE, *, includes: list[str]) -> None:
+    assert len(includes) > 0
+    target.properties[access].includes.extend(includes)
+
+
+def target_macros(target: Target, access=Access.PRIVATE, *, macros: dict[str, str]) -> None:
+    assert len(macros) > 0
+    target.properties[access].macros.update(**macros)
+
+
 def add_target(
     name: str, kind: TargetKind, sources: list[str] | None = None
 ) -> Target:
@@ -199,7 +229,6 @@ def add_target(
             raise Exception("Failed to guess language via extension.")  # XXX
 
         source_files.append(SourceFile(path=source, language=language))
-
 
     target = Target(name=name, kind=kind, sources=source_files)
 
@@ -236,15 +265,21 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
     target_output_prefix = join(conf.get_output_folder(), target.name)
     makedirs(target_output_prefix, exist_ok=True)
 
+    includes = []
+    macros = {}
+
+    for _, properties in target.properties.items():
+        includes.extend(properties.includes)
+        macros.update(**properties.macros)
+
+
     if conf.compiler == Compiler.MSVC:
         # TODO(gr3yknigh1): Expose to the user the libraries which he want's to link [2025/06/02]
         libraries = ["kernel32.lib", "user32.lib", "gdi32.lib"]
         object_files: list[str] = []
 
         if sys.platform == "win32":
-            target.includes = [
-                include.replace("/", "\\") for include in target.includes
-            ]
+            includes = [include.replace("/", "\\") for include in includes]
 
         # TODO(gr3yknigh1): Expose this option via platform-specific API configurations [2025/06/03]
         runtime_library = (
@@ -289,8 +324,8 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
                 output=object_file,
                 only_compilation=True,
                 produce_pdb=conf.build_type == BuildType.DEBUG,
-                includes=target.includes,
-                defines=target.defines,
+                includes=includes,
+                defines=macros,
                 output_kind=msvc.OutputKind.OBJECT_FILE,
                 optimization_level=optimization_level,
                 language_standard=language_standard,
