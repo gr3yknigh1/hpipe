@@ -11,14 +11,15 @@ import importlib.util
 
 
 from htask import Context
-from htask.progs import msvc
+from htask.progs import msvc, cmake
 
 __all__ = (
     "Target",
     "TargetKind",
     "add_target",
-    "add_library",
     "add_executable",
+    "add_library",
+    "add_external_library",
     "compile_target",
     "compile_project",
     "Configuration",
@@ -26,6 +27,7 @@ __all__ = (
     "BuildType",
     "Architecture",
     "Compiler",
+    "ExternalTool",
     "Access",
     "target_includes",
     "target_macros",
@@ -84,6 +86,14 @@ _EXT_TO_LANGUAGE = {
         ".c",
         ".h",
     ),
+    "CXX": (
+        ".cpp",
+        ".hpp",
+        ".cxx",
+        ".hxx",
+        ".cc",
+        ".hh",
+    )
 }
 
 
@@ -141,6 +151,8 @@ class Target:
 
     properties: dict[Access, TargetProperties] = field(default_factory=dict)
 
+    external_build: ExternalBuildProps | None = field(default=None)
+
     def __post_init__(self):
         for access in Access:
             self.properties[access] = TargetProperties()
@@ -163,6 +175,18 @@ class Target:
 
     def get_artefact_path(self, conf: Configuration) -> str:
         ext = self.get_artefact_ext(conf)
+
+        if self.external_build is not None:
+            # TODO(gr3yknigh1): Find better way of handling properties of external dependencies. [2025/06/03]
+
+            if self.external_build.tool == ExternalTool.CMAKE:
+
+                # TODO(gr3yknigh1): Check for multi-config generators. See: https://cmake.org/cmake/help/latest/prop_gbl/GENERATOR_IS_MULTI_CONFIG.html o
+                # [2025/06/03]
+                return join(conf.get_output_folder(), "_external_cmake", self.name, self.name, conf.build_type, f"{self.name}{ext}")
+
+            raise NotImplementedError("...")
+
         return join(conf.get_output_folder(), f"{self.name}{ext}")
 
 
@@ -209,10 +233,36 @@ class Configuration:
         )
 
 
-def add_library(name: str, sources: list[str] | None = None, *, dynamic=False):
+def add_library(name: str, sources: list[str] | None = None, *, dynamic=False) -> Target:
     if dynamic:
         return add_target(name, TargetKind.DYNAMIC_LIBRARY, sources)
     return add_target(name, TargetKind.STATIC_LIBRARY, sources)
+
+
+class ExternalTool(IntEnum):
+    CMAKE = auto()
+
+
+@dataclass
+class ExternalBuildProps:
+
+    tool: ExternalTool
+    location: str
+
+
+def add_external_library(name: str, *, location: str, tool: ExternalTool, dynamic=False) -> Target:
+    return add_target(
+        name,
+        kind=(
+            TargetKind.DYNAMIC_LIBRARY
+            if dynamic
+            else TargetKind.STATIC_LIBRARY
+        ),
+        external_build=ExternalBuildProps(
+            tool=tool,
+            location=location,
+        )
+    )
 
 
 def add_executable(name: str, sources: list[str] | None = None):
@@ -235,7 +285,10 @@ def target_links(target, access=Access.PRIVATE, *, links: list[Target]) -> None:
 
 
 def add_target(
-    name: str, kind: TargetKind, sources: list[str] | None = None
+    name: str,
+    kind: TargetKind,
+    sources: list[str] | None = None,
+    external_build: ExternalBuildProps | None = None,
 ) -> Target:
 
     if sources is None:
@@ -251,7 +304,7 @@ def add_target(
 
         source_files.append(SourceFile(path=source, language=language))
 
-    target = Target(name=name, kind=kind, sources=source_files)
+    target = Target(name=name, kind=kind, sources=source_files, external_build=external_build)
 
     for t in _targets:
         if t.name == target.name:
@@ -276,6 +329,35 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
     )
 
     if target.state == TargetState.ALREADY_COMPILED:
+        return public_props
+
+    if target.external_build is not None:
+
+        if target.external_build.tool == ExternalTool.CMAKE:
+            # TODO(gr3yknigh1): Find better way of handling properties of external dependencies. [2025/06/03]
+
+            target_output_folder = join(conf.get_output_folder(), "_external_cmake", target.name)
+            makedirs(target_output_folder, exist_ok=True)
+
+            cmake.configure(
+                c,
+                source_folder=target.external_build.location,
+                build_folder=target_output_folder,
+                variables=dict(
+                    CMAKE_BUILD_TYPE=conf.build_type,
+                )
+            )
+
+            cmake.build(
+                c,
+                configuration_name=conf.build_type,
+                source_folder=target.external_build.location,
+                build_folder=target_output_folder,
+            )
+        else:
+            raise NotImplementedError(f"Unhandled external tool! {target.external_build!r}")
+
+        target.state = TargetState.ALREADY_COMPILED
         return public_props
 
     # This is used to compile current target.
@@ -334,10 +416,12 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
             else msvc.RuntimeLibrary.STATIC
         )
 
+
+        # NOTE(gr3yknigh1): Currently supporting C and C++ ;C [2025/06/03]
         language_standard = (
             msvc.LanguageStandard.C_LATEST
             if source.language == Language.C
-            else msvc.LanguageStandard.CXX_14
+            else msvc.LanguageStandard.CXX_LATEST
         )
 
         debug_info_mode = (

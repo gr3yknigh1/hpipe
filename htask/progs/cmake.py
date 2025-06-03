@@ -30,7 +30,7 @@ def configure(
     cmake_executable: Optional[str]=None,
     generator: Optional[str]=None,
     variables: Optional[Mapping[str, Any]]=None,
-) -> None:
+) -> Result:
 
     if cmake_executable is None:
         cmake_executable = shutil.which("cmake")
@@ -55,7 +55,7 @@ def configure(
 
         command += f" -D {key}={str(value)}"
 
-    c.run(command)
+    return c.run(command)
 
 def build(
     c: Context,
@@ -64,7 +64,7 @@ def build(
     source_folder: Optional[str]=None,
     build_folder: Optional[str]=None,
     cmake_executable: Optional[str]=None
-) -> None:
+) -> Result:
 
     if cmake_executable is None:
         cmake_executable = shutil.which("cmake")
@@ -76,5 +76,5 @@ def build(
     build_folder = build_folder if build_folder is not None else join(source_folder, "build")
 
     command = f"{c.quote(cmake_executable)} --build {build_folder} --config {configuration_name}"
-    c.run(command)
+    return c.run(command)
 
