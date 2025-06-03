@@ -26,6 +26,7 @@ __all__ = (
     "BuildType",
     "Architecture",
     "Compiler",
+    "Access",
     "target_includes",
     "target_macros",
     "target_links",
@@ -109,7 +110,20 @@ class SourceFile:
 class TargetProperties:
     includes: list[str] = field(default_factory=list)
     macros: dict[str, str] = field(default_factory=dict)
+
+    # ?
     links: list[Target] = field(default_factory=list)
+
+    def merge(self, other: TargetProperties) -> TargetProperties:
+        new = TargetProperties()
+
+        new.includes.extend(self.includes)
+        new.includes.extend(other.includes)
+
+        new.macros.update(**self.macros)
+        new.macros.update(**other.macros)
+
+        return new
 
 
 class Access(IntEnum):
@@ -250,19 +264,43 @@ def add_target(
     return target
 
 
-def compile_target(c: Context, *, conf: Configuration, target: Target):
-    if target.state == TargetState.ALREADY_COMPILED:
-        return
+def compile_target(c: Context, *, conf: Configuration, target: Target) -> TargetProperies:
+    """ Compiles the target and it's dependencies.
 
+    :returns: All public properties, propagated from the bottom of dependency graph.
+    """
+
+    public_props = TargetProperties(
+        macros=target.properties[Access.PUBLIC].macros,
+        includes=target.properties[Access.PUBLIC].includes,
+    )
+
+    if target.state == TargetState.ALREADY_COMPILED:
+        return public_props
+
+    # This is used to compile current target.
     libraries = []
     includes = []
     macros = {}
 
+    # Include all props from this target
+    for _, properties in target.properties.items():
+        includes.extend(properties.includes)
+        macros.update(**properties.macros)
+
+
+    # Compile dependencies, gather and include all public props from them.
     for _, props in target.properties.items():
         for link_target in props.links:
-            compile_target(c, conf=conf, target=link_target)
+
+            # Propagated properties from the bottom of dependency graph. 
+            link_public_props: TargetProperties = compile_target(c, conf=conf, target=link_target)
+
+            includes.extend(link_public_props.includes)
+            macros.update(**link_public_props.macros)
 
             libraries.append(link_target.get_artefact_path(conf))
+            public_props = public_props.merge(link_public_props)
 
 
     sources = []
@@ -279,10 +317,6 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
 
     target_output_prefix = join(conf.get_output_folder(), target.name)
     makedirs(target_output_prefix, exist_ok=True)
-
-    for _, properties in target.properties.items():
-        includes.extend(properties.includes)
-        macros.update(**properties.macros)
 
 
     if conf.compiler == Compiler.MSVC:
@@ -404,18 +438,18 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
                 env=conf.environment,
             )
         else:
-            raise NotImplementedError("...")
+            raise Exception(f"Unhandled kind of targets! kind={target.kind!r}.")
 
         if result.return_code != 0:
             raise Exception(
                 f"Failed to compile! return_code={result.return_code!r}"
             )
     else:
-        raise NotImplementedError("Support only MSVC for now...")
+        raise NotImplementedError("Sorry. We are supporting only MSVC for now...")
 
     target.state = TargetState.ALREADY_COMPILED
 
-    return result
+    return public_props
 
 
 def compile_project(
