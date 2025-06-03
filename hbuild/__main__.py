@@ -40,9 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     echo = getattr(args, "echo", None)
     assert echo is not None
 
-
     c = Context(root=working_dir)
-
     compile_project(c, build_file=build_file, prefix=join(working_dir, "build"))
 
     return 0

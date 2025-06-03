@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 from typing import Any
 
 from enum import StrEnum
@@ -78,6 +77,23 @@ class OutputKind(StrEnum):
     STATIC_LIBRARY="static_library"
     DYNAMIC_LIBRARY="dynamic_library"
 
+class DebugInfoMode(StrEnum):
+    NONE = "NONE"
+    FASTLINK = "FASTLINK"
+    FULL = "FULL"
+
+class LanguageStandard(StrEnum):
+
+    CXX_14 = "c++14"
+    CXX_17 = "c++17"
+    CXX_20 = "c++20"
+    CXX_LATEST = "c++latest"
+
+    C_11 = "c11"
+    C_17 = "c17"
+    C_LATEST = "clatest"
+    
+
 def compile(
     c: Context,
     sources: list[str],
@@ -93,7 +109,11 @@ def compile(
     env: dict[str, Any] | None=None,
     only_preprocessor=False,
     unicode_support=False,
-    is_dll=False,
+    language_standard: LanguageStandard | None = None,
+
+    # TODO(gr3yknigh1): Refactor linker flags out from this function [2025/06/03]
+    debug_info_mode: DebugInfoMode | None = None,
+    is_dll=False, 
     **kw
 ):
     if env is None:
@@ -123,8 +143,14 @@ def compile(
     if only_preprocessor:
         compile_flags.append("/P")
 
+    if language_standard is not None:
+        compile_flags.append(f"/std:{language_standard!s}")
+
     if is_dll:
         link_flags.append("/DLL")
+
+    if debug_info_mode is not None:
+        link_flags.append(f"/DEBUG:{debug_info_mode!s}")
 
     if output_debug_info_path is not None:
         compile_flags.append(f"/Fd:{output_debug_info_path}")

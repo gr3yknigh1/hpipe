@@ -249,21 +249,12 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
                     "/MTd",         # Link with static debug runtime.
                     "/Zi",
                 ])
-                link_flags.extend([
-                    "/DEBUG:FULL",
-                ])
 
             if conf.build_type == BuildType.RELEASE:
                 compile_flags.extend([
                     "/O2",   # Maximum optimizations.
                     "/MT",   # Link with static release runtime.
                 ])
-
-            if source.language == Language.C:
-                compile_flags.append("/std:clatest")
-
-            if source.language == Language.CXX:
-                compile_flags.append("/std:c++14")
 
             result = msvc.compile(
                 c, [source_path],
@@ -273,6 +264,8 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
                 link_flags=link_flags,
                 defines=target.defines,
                 output_kind=msvc.OutputKind.OBJECT_FILE,
+                language_standard=msvc.LanguageStandard.C_LATEST if source.language == Language.C else msvc.LanguageStandard.CXX_14,
+                debug_info_mode=msvc.DebugInfoMode.FULL if conf.build_type == BuildType.DEBUG else msvc.DebugInfoMode.NONE,
                 env=conf.environment,
             )
 
@@ -292,6 +285,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
 
         if conf.build_type == BuildType.DEBUG:
             # TODO(gr3yknigh1): Move to MSVC interface (msvc.py) [2025/06/02]
+
             compile_flags.extend([
                 "/Zi",
             ])
@@ -339,7 +333,15 @@ def compile_target(c: Context, *, conf: Configuration, target: Target):
     return result
 
 
-def compile_project(c: Context, *, build_file: str, prefix: str) -> Result:
+def compile_project(
+    c: Context,
+    *,
+    build_file: str,
+    prefix: str,
+    compiler=Compiler.detect_compiler(),
+    build_type=BuildType.DEBUG,
+    architecture=Architecture.X86_64,
+) -> Result:
 
     module_spec_name = "__hbuild_build_file__"
     
@@ -359,7 +361,13 @@ def compile_project(c: Context, *, build_file: str, prefix: str) -> Result:
     module_spec.loader.exec_module(module)
 
     # TODO(gr3yknigh1): Expose more configuration stuff in command-line [2025/06/01]
-    conf = configure(c, prefix=prefix) 
+    conf = configure(
+        c,
+        compiler=compiler,
+        build_type=build_type,
+        architecture=architecture,
+        prefix=prefix,
+    )
 
     for target in _targets:
         compile_target(c, conf=conf, target=target)
