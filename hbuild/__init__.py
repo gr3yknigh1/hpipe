@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from enum import StrEnum
-from enum import IntEnum
-from enum import auto
+from enum import StrEnum, IntEnum, auto
 from dataclasses import dataclass, field
 from os import makedirs
-from os.path import exists, isabs, join, splitext, basename
-import sys
+from os.path import exists, isabs, join, splitext, basename, dirname
+from copy import copy
 import importlib.util
+import sys
+import inspect
 
 
 from htask import Context
@@ -16,26 +16,27 @@ from htask.progs import msvc, cmake
 __all__ = (
     "Target",
     "TargetKind",
+    "add_package",
     "add_target",
     "add_executable",
     "add_library",
     "add_external_library",
     "compile_target",
-    "compile_project",
+    "compile_package",
     "Configuration",
     "configure",
     "BuildType",
     "Architecture",
     "Compiler",
-    "ExternalTool",
+    "BuildTool",
     "Access",
     "target_includes",
     "target_macros",
     "target_links",
 )
 
+HBUILD_MAGIC_PACKAGE_LIST_ATTR_NAME = "__hbuild_magic_package_list__"
 
-_targets: list[Target] = []
 
 
 class BuildType(StrEnum):
@@ -179,12 +180,16 @@ class Target:
         if self.external_build is not None:
             # TODO(gr3yknigh1): Find better way of handling properties of external dependencies. [2025/06/03]
 
-            if self.external_build.tool == ExternalTool.CMAKE:
+            if self.external_build.tool == BuildTool.CMAKE:
 
                 # TODO(gr3yknigh1): Check for multi-config generators. See: https://cmake.org/cmake/help/latest/prop_gbl/GENERATOR_IS_MULTI_CONFIG.html o
                 # [2025/06/03]
                 return join(conf.get_output_folder(), "_external_cmake", self.name, self.name, conf.build_type, f"{self.name}{ext}")
 
+            if self.external_build.tool == BuildTool.HBUILD:
+                return join(conf.get_output_folder(), "_external", self.name, arch_to_bitness(conf.architecture), conf.build_type, f"{self.name}{ext}" )
+
+            breakpoint()
             raise NotImplementedError("...")
 
         return join(conf.get_output_folder(), f"{self.name}{ext}")
@@ -193,12 +198,14 @@ class Target:
 def configure(
     c: Context,
     prefix: str,
+    build_file: str,
     compiler=Compiler.detect_compiler(),
     build_type=BuildType.DEBUG,
     architecture=Architecture.X86_64,
 ) -> Configuration:
     conf = Configuration(
         prefix=prefix,
+        build_file=build_file,
         compiler=compiler,
         build_type=build_type,
         architecture=architecture,
@@ -219,6 +226,7 @@ def configure(
 @dataclass
 class Configuration:
     prefix: str
+    build_file: str
     compiler: Compiler
     build_type: BuildType
     architecture: Architecture
@@ -232,6 +240,41 @@ class Configuration:
             self.build_type,
         )
 
+    def get_project_folder(self):
+        return dirname(self.build_file)
+
+@dataclass
+class Package:
+    name: str
+    targets: Target
+
+
+def add_package(name: str, *, targets: list[Target]) -> Package:
+    frame = inspect.currentframe()
+    
+    try:
+        current = frame
+        while HBUILD_MAGIC_PACKAGE_LIST_ATTR_NAME not in current.f_globals.keys():
+            current = current.f_back
+        else:
+
+            new = Package(name, targets)
+
+            packages: list[Package] | None = current.f_globals.get(HBUILD_MAGIC_PACKAGE_LIST_ATTR_NAME, None)
+            assert packages is not None
+
+            for package in packages:
+                if package.name == new:
+                    raise Exception(f"Found package with the same name as new! new={new!r} old={package!r}")
+
+            packages.append(new)
+            return new
+
+    finally:
+        del frame
+
+    raise Exception("Failed to find magic list of packages! You might be called not from build file?")
+    
 
 def add_library(name: str, sources: list[str] | None = None, *, dynamic=False) -> Target:
     if dynamic:
@@ -239,18 +282,19 @@ def add_library(name: str, sources: list[str] | None = None, *, dynamic=False) -
     return add_target(name, TargetKind.STATIC_LIBRARY, sources)
 
 
-class ExternalTool(IntEnum):
+class BuildTool(IntEnum):
+    HBUILD = auto()
     CMAKE = auto()
 
 
 @dataclass
 class ExternalBuildProps:
-
-    tool: ExternalTool
+    tool: BuildTool
     location: str
+    build_file: str = field(default="build.py")
 
 
-def add_external_library(name: str, *, location: str, tool: ExternalTool, dynamic=False) -> Target:
+def add_external_library(name: str, *, location: str, tool=BuildTool.HBUILD, dynamic=False) -> Target:
     return add_target(
         name,
         kind=(
@@ -306,14 +350,6 @@ def add_target(
 
     target = Target(name=name, kind=kind, sources=source_files, external_build=external_build)
 
-    for t in _targets:
-        if t.name == target.name:
-            raise Exception(
-                f"Target with the same name was already defined: {t!r}."
-            )
-
-    _targets.append(target)
-
     return target
 
 
@@ -328,12 +364,34 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
         includes=target.properties[Access.PUBLIC].includes,
     )
 
-    if target.state == TargetState.ALREADY_COMPILED:
-        return public_props
+    # TODO(gr3yknigh1): This breaks the external builds... Public props not filled with parsed information about packages. [2025/06/05]
+    # if target.state == TargetState.ALREADY_COMPILED:
+    #     return public_props
 
     if target.external_build is not None:
 
-        if target.external_build.tool == ExternalTool.CMAKE:
+        external_build = target.external_build
+
+        if external_build.tool == BuildTool.HBUILD:
+
+            result_props = compile_package(
+                c,
+                build_file=join(external_build.location, external_build.build_file),
+                prefix=join(conf.get_output_folder(), "_external", target.name),
+
+                # TODO(gr3yknigh1): Maybe it's better to pass Configuration? [2025/06/04]
+                compiler=conf.compiler,
+                build_type=conf.build_type,
+                architecture=conf.architecture,
+            )
+
+            for index, include in enumerate(copy(result_props.includes)):
+                if not isabs(include):
+                    result_props.includes[index] = join(target.external_build.location, include)
+
+            public_props = public_props.merge(result_props)
+            
+        elif external_build.tool == BuildTool.CMAKE:
             # TODO(gr3yknigh1): Find better way of handling properties of external dependencies. [2025/06/03]
 
             target_output_folder = join(conf.get_output_folder(), "_external_cmake", target.name)
@@ -384,11 +442,10 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
             libraries.append(link_target.get_artefact_path(conf))
             public_props = public_props.merge(link_public_props)
 
-
     sources = []
     for source in target.sources:
         if not isabs(source.path):
-            source.path = join(c.cwd(), source.path)
+            source.path = join(conf.get_project_folder(), source.path)
         sources.append(source)
 
     lost_sources = [source for source in sources if not exists(source.path)]
@@ -399,15 +456,21 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
 
     target_output_prefix = join(conf.get_output_folder(), target.name)
     makedirs(target_output_prefix, exist_ok=True)
+ 
+    for index, include in enumerate(copy(includes)):
+        if not isabs(include):
+            includes[index] = join(conf.get_project_folder(), include)
 
+    if sys.platform == "win32":
+        includes = [include.replace("/", "\\") for include in includes]
+
+
+    print("<========= ", target.name, target.properties, includes)
 
     if conf.compiler == Compiler.MSVC:
         # TODO(gr3yknigh1): Expose to the user the libraries which he want's to link [2025/06/02]
         libraries.extend(["kernel32.lib", "user32.lib", "gdi32.lib"])
         object_files: list[str] = []
-
-        if sys.platform == "win32":
-            includes = [include.replace("/", "\\") for include in includes]
 
         # TODO(gr3yknigh1): Expose this option via platform-specific API configurations [2025/06/03]
         runtime_library = (
@@ -416,13 +479,6 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
             else msvc.RuntimeLibrary.STATIC
         )
 
-
-        # NOTE(gr3yknigh1): Currently supporting C and C++ ;C [2025/06/03]
-        language_standard = (
-            msvc.LanguageStandard.C_LATEST
-            if source.language == Language.C
-            else msvc.LanguageStandard.CXX_LATEST
-        )
 
         debug_info_mode = (
             msvc.DebugInfoMode.FULL
@@ -439,6 +495,13 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
         for source in sources:
             source_name, source_ext = splitext(basename(source.path))
             object_file = join(target_output_prefix, f"{source_name}.obj")
+
+            # NOTE(gr3yknigh1): Currently supporting C and C++ ;C [2025/06/03]
+            language_standard = (
+                msvc.LanguageStandard.C_LATEST
+                if source.language == Language.C
+                else msvc.LanguageStandard.CXX_LATEST
+            )
 
             if not isabs(source.path):
                 source_path = join(c.cwd(), source.path)
@@ -539,7 +602,8 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
     return public_props
 
 
-def compile_project(
+# TODO: Rename back to projects...
+def compile_package(
     c: Context,
     *,
     build_file: str,
@@ -547,32 +611,45 @@ def compile_project(
     compiler=Compiler.detect_compiler(),
     build_type=BuildType.DEBUG,
     architecture=Architecture.X86_64,
-) -> None:
-    module_spec_name = "__hbuild_build_file__"
+) -> TargetProperties:
+    print(f"> Compiling {build_file!r}")  # XXX
+
+    filename = basename(build_file)
 
     module_spec = importlib.util.spec_from_file_location(
-        module_spec_name, build_file
+        filename, build_file
     )
 
     if module_spec is None:
         raise NotImplementedError()
 
     module = importlib.util.module_from_spec(module_spec)
+    setattr(module, HBUILD_MAGIC_PACKAGE_LIST_ATTR_NAME, [])
 
     if module_spec.loader is None:
         raise NotImplementedError()
 
-    sys.modules[module_spec_name] = module
     module_spec.loader.exec_module(module)
 
+    packages: list[Package] | None = getattr(module, HBUILD_MAGIC_PACKAGE_LIST_ATTR_NAME, None)
+    assert packages is not None
+
+
+    if len(packages) <= 0:
+        raise Exception("No packages was found! Use `add_package` in order to wrap targets in compilable project.")
+    properties = TargetProperties()
     # TODO(gr3yknigh1): Expose more configuration stuff in command-line [2025/06/01]
     conf = configure(
         c,
+        build_file=build_file,
         compiler=compiler,
         build_type=build_type,
         architecture=architecture,
         prefix=prefix,
     )
 
-    for target in _targets:
-        compile_target(c, conf=conf, target=target)
+    for package in packages:
+        for target in package.targets:
+            properties = properties.merge(compile_target(c, conf=conf, target=target))
+
+    return properties
