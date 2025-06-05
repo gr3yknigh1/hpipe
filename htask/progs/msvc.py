@@ -324,6 +324,10 @@ def show_includes(
 
     for line in result.output.split("\n"):
         if not line.startswith(prefix):
+
+            if "error" in line or "warning" in line:
+                raise Exception(f"Failed to retrive include files for source file! source={source_file} line={line!r}")
+
             continue
         line = line.replace(prefix, "", 1)
         line = line.strip()

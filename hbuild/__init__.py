@@ -597,7 +597,6 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
             source_hash.update(bytes(int(optimization_level.value)))
             for source_include_file in source_include_files:
                 source_include_file_hash = compute_file_hash(source_include_file)
-                # print(source_include_file_hash.digest(), " ====================> ", source_include_file)
                 source_hash.update(source_include_file_hash.digest())
 
             local_cache = conf.get_local_cache()
@@ -606,9 +605,12 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
             cached_object_file_source_hash_digest = local_cache.get(object_file, None)
 
             if cached_object_file_source_hash_digest is not None and cached_object_file_source_hash_digest == source_hash_digest:
-                print(f">>> Cache hit! {source.path!r} hash={source_hash_digest!r} local_cache={local_cache!r} include_files={source_include_files!r}")
+                print(f">> Cache hit. {source.path!r} hash={source_hash_digest!r}")
+                #print(f">>> Cache hit! {source.path!r} hash={source_hash_digest!r} local_cache={local_cache!r} include_files={source_include_files!r}")
+                pass
             else:
-                print(f">>> Cache miss! {source.path!r} hash={source_hash_digest!r} cached_hash={cached_object_file_source_hash_digest!r} local_cache={local_cache!r} include_files={source_include_files!r}")
+                print(f">> Cache miss. {source.path!r} hash={source_hash_digest!r}")
+                #print(f">>> Cache miss! {source.path!r} hash={source_hash_digest!r} cached_hash={cached_object_file_source_hash_digest!r} local_cache={local_cache!r} include_files={source_include_files!r}")
 
                 result = msvc.compile(
                     c,
