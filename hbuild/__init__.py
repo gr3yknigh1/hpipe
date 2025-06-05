@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-from enum import StrEnum, IntEnum, auto
-from dataclasses import dataclass, field
-from os import makedirs
 from os.path import exists, isabs, join, splitext, basename, dirname
+from dataclasses import dataclass, field
+from contextlib import contextmanager
+from enum import StrEnum, IntEnum, auto
+from collections import Counter
 from functools import lru_cache
+from os import makedirs
 from copy import copy
 import importlib.util
 import sys
 import hashlib
 import inspect
 import pickle
+import time
 
 
 from htask import Context
@@ -25,7 +28,7 @@ __all__ = (
     "add_library",
     "add_external_library",
     "compile_target",
-    "compile_package",
+    "compile_project",
     "Configuration",
     "configure",
     "BuildType",
@@ -36,6 +39,9 @@ __all__ = (
     "target_includes",
     "target_macros",
     "target_links",
+    "Reporter",
+    "NullReporter",
+    "print_report",
 )
 
 HBUILD_MAGIC_PACKAGE_LIST_ATTR_NAME = "__hbuild_magic_package_list__"
@@ -401,11 +407,14 @@ def add_target(
     return target
 
 
-def compile_target(c: Context, *, conf: Configuration, target: Target) -> TargetProperies:
+def compile_target(c: Context, *, conf: Configuration, package: Package, target: Target, reporter: Reporter | None = None) -> TargetProperies:
     """ Compiles the target and it's dependencies.
 
     :returns: All public properties, propagated from the bottom of dependency graph.
     """
+
+    if reporter is None:
+        reporter = NullReporter()
 
     public_props = TargetProperties(
         macros=target.properties[Access.PUBLIC].macros,
@@ -422,7 +431,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
 
         if external_build.tool == BuildTool.HBUILD:
 
-            result_props = compile_package(
+            result_props = compile_project(
                 c,
                 build_file=join(external_build.location, external_build.build_file),
                 prefix=conf.prefix,
@@ -431,6 +440,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
                 compiler=conf.compiler,
                 build_type=conf.build_type,
                 architecture=conf.architecture,
+                reporter=reporter,
             )
 
             for index, include in enumerate(copy(result_props.includes)):
@@ -482,7 +492,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
         for link_target in props.links:
 
             # Propagated properties from the bottom of dependency graph. 
-            link_public_props: TargetProperties = compile_target(c, conf=conf, target=link_target)
+            link_public_props: TargetProperties = compile_target(c, conf=conf, package=package, target=link_target, reporter=reporter)
 
             includes.extend(link_public_props.includes)
             macros.update(**link_public_props.macros)
@@ -543,7 +553,8 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
 
         for source in sources:
 
-            source_name, source_ext = splitext(basename(source.path))
+            source_file_name = basename(source.path)
+            source_name, source_ext = splitext(source_file_name)
             object_file = join(target_output_prefix, f"{source_name}.obj")
 
             # NOTE(gr3yknigh1): Currently supporting C and C++ ;C [2025/06/03]
@@ -590,43 +601,46 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
                 macros=macros,
                 language_standard=language_standard,
                 env=conf.environment,
+                quiet=True,
             )
 
-            source_hash = compute_file_hash(source.path)
-            source_hash.update(language_standard.value.encode("utf-8"))
-            source_hash.update(bytes(int(optimization_level.value)))
-            for source_include_file in source_include_files:
-                source_include_file_hash = compute_file_hash(source_include_file)
-                source_hash.update(source_include_file_hash.digest())
+            # TODO(gr3yknigh1): Stop computing hash for each source file. Check timestamp of last change! [2025/06/05]
+
+            with reporter.mesure_time(f"compile:{package.name}.{target.name}.{source_file_name}:compute_hash"):
+                source_hash = compute_file_hash(source.path)
+                source_hash.update(language_standard.value.encode("utf-8"))
+                source_hash.update(bytes(int(optimization_level.value)))
+                for source_include_file in source_include_files:
+                    source_include_file_hash = compute_file_hash(source_include_file)
+                    source_hash.update(source_include_file_hash.digest())
 
             local_cache = conf.get_local_cache()
 
             source_hash_digest = source_hash.digest()
+
             cached_object_file_source_hash_digest = local_cache.get(object_file, None)
 
             if cached_object_file_source_hash_digest is not None and cached_object_file_source_hash_digest == source_hash_digest:
-                print(f">> Cache hit. {source.path!r} hash={source_hash_digest!r}")
-                #print(f">>> Cache hit! {source.path!r} hash={source_hash_digest!r} local_cache={local_cache!r} include_files={source_include_files!r}")
-                pass
+                reporter.count_increment("cache:hit")
             else:
-                print(f">> Cache miss. {source.path!r} hash={source_hash_digest!r}")
-                #print(f">>> Cache miss! {source.path!r} hash={source_hash_digest!r} cached_hash={cached_object_file_source_hash_digest!r} local_cache={local_cache!r} include_files={source_include_files!r}")
+                reporter.count_increment("cache:miss")
 
-                result = msvc.compile(
-                    c,
-                    [source_path],
-                    output=object_file,
-                    only_compilation=True,
-                    produce_pdb=is_debug,
-                    includes=includes,
-                    defines=macros,
-                    output_kind=msvc.OutputKind.OBJECT_FILE,
-                    optimization_level=optimization_level,
-                    language_standard=language_standard,
-                    debug_info_mode=debug_info_mode,
-                    runtime_library=runtime_library,
-                    env=conf.environment,
-                )
+                with reporter.mesure_time(f"compile:{package.name}.{target.name}.{source_file_name}:msvc_compile"):
+                    result = msvc.compile(
+                        c,
+                        [source_path],
+                        output=object_file,
+                        only_compilation=True,
+                        produce_pdb=is_debug,
+                        includes=includes,
+                        defines=macros,
+                        output_kind=msvc.OutputKind.OBJECT_FILE,
+                        optimization_level=optimization_level,
+                        language_standard=language_standard,
+                        debug_info_mode=debug_info_mode,
+                        runtime_library=runtime_library,
+                        env=conf.environment,
+                    )
 
                 if result.return_code != 0:
                     raise Exception(
@@ -637,41 +651,42 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
 
             object_files.append(object_file)
 
-        if target.kind == TargetKind.EXECUTABLE:
-            result = msvc.compile(
-                c,
-                [],
-                output=output,
-                output_kind=msvc.OutputKind.EXECUTABLE,
-                output_debug_info_path=f"{output_filename}.pdb",
-                produce_pdb=is_debug,
-                debug_info_mode=debug_info_mode,
-                libs=[*object_files, *libraries],
-                env=conf.environment,
-            )
-        elif target.kind == TargetKind.STATIC_LIBRARY:
-            result = msvc.link(
-                c,
-                object_files,
-                output=target.get_artefact_path(conf),
-                output_kind=msvc.OutputKind.STATIC_LIBRARY,
-                env=conf.environment,
-            )
-        elif target.kind == TargetKind.DYNAMIC_LIBRARY:
-            result = msvc.compile(
-                c,
-                object_files,
-                output=target.get_artefact_path(conf),
-                output_kind=msvc.OutputKind.DYNAMIC_LIBRARY,
-                output_debug_info_path=f"{output_filename}.pdb",
-                debug_info_mode=debug_info_mode,
-                produce_pdb=is_debug,
-                libs=libraries,
-                env=conf.environment,
-                is_dll=True,
-            )
-        else:
-            raise Exception(f"Unhandled kind of targets! kind={target.kind!r}.")
+        with reporter.mesure_time(f"compile:{package.name}.{target.name}:msvc_link"):
+            if target.kind == TargetKind.EXECUTABLE:
+                result = msvc.compile(
+                    c,
+                    [],
+                    output=output,
+                    output_kind=msvc.OutputKind.EXECUTABLE,
+                    output_debug_info_path=f"{output_filename}.pdb",
+                    produce_pdb=is_debug,
+                    debug_info_mode=debug_info_mode,
+                    libs=[*object_files, *libraries],
+                    env=conf.environment,
+                )
+            elif target.kind == TargetKind.STATIC_LIBRARY:
+                result = msvc.link(
+                    c,
+                    object_files,
+                    output=target.get_artefact_path(conf),
+                    output_kind=msvc.OutputKind.STATIC_LIBRARY,
+                    env=conf.environment,
+                )
+            elif target.kind == TargetKind.DYNAMIC_LIBRARY:
+                result = msvc.compile(
+                    c,
+                    object_files,
+                    output=target.get_artefact_path(conf),
+                    output_kind=msvc.OutputKind.DYNAMIC_LIBRARY,
+                    output_debug_info_path=f"{output_filename}.pdb",
+                    debug_info_mode=debug_info_mode,
+                    produce_pdb=is_debug,
+                    libs=libraries,
+                    env=conf.environment,
+                    is_dll=True,
+                )
+            else:
+                raise Exception(f"Unhandled kind of targets! kind={target.kind!r}.")
 
         if result.return_code != 0:
             raise Exception(
@@ -685,8 +700,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
     return public_props
 
 
-# TODO: Rename back to projects...
-def compile_package(
+def compile_project(
     c: Context,
     *,
     build_file: str,
@@ -694,7 +708,12 @@ def compile_package(
     compiler=Compiler.detect_compiler(),
     build_type=BuildType.DEBUG,
     architecture=Architecture.X86_64,
+    reporter: Reporter | None = None,
 ) -> TargetProperties:
+
+    if reporter is None:
+        reporter = NullReporter()
+
     filename = basename(build_file)
 
     module_spec = importlib.util.spec_from_file_location(
@@ -715,11 +734,11 @@ def compile_package(
     packages: list[Package] | None = getattr(module, HBUILD_MAGIC_PACKAGE_LIST_ATTR_NAME, None)
     assert packages is not None
 
-
     if len(packages) <= 0:
         raise Exception("No packages was found! Use `add_package` in order to wrap targets in compilable project.")
 
     properties = TargetProperties()
+
     # TODO(gr3yknigh1): Expose more configuration stuff in command-line [2025/06/01]
     conf = configure(
         c,
@@ -732,12 +751,89 @@ def compile_package(
 
     cache_file = join(conf.get_output_folder(), "cache.pickle")
 
-    conf.load_local_cache(cache_file)
+    with reporter.mesure_time("cache:load"):
+        conf.load_local_cache(cache_file)
 
     for package in packages:
         for target in package.targets:
-            properties = properties.merge(compile_target(c, conf=conf, target=target))
+            with reporter.mesure_time(f"compile:{package.name}.{target.name}"):
+                target_properties = compile_target(c, conf=conf, package=package, target=target, reporter=reporter)
+            properties = properties.merge(target_properties)
 
-    conf.save_local_cache(cache_file)
+    with reporter.mesure_time("cache:save"):
+        conf.save_local_cache(cache_file)
 
     return properties
+
+
+
+class Reporter:
+
+    count: Counter
+    mesurements: dict[str, int]
+
+    def __init__(self) -> None:
+        self.count = Counter()
+        self.mesurements = {}
+
+    def count_increment(self, name: str, value=1) -> int:
+        self.count[name] += value
+
+    def count_decrement(self, name: str, value=1) -> int:
+        self.count[name] -= value
+
+    @contextmanager
+    def mesure_time(self, label: str) -> None:
+        start = time.monotonic_ns() 
+
+        try:
+            yield
+        finally:
+            end = time.monotonic_ns()
+
+            self.mesurements[label] = end - start
+
+
+def print_report(reporter: Reporter):
+
+    mesurements = dict(sorted(reporter.mesurements.items()))
+
+    print("")
+    print(" =================== REPORT =================== ")
+    print("")
+    print(" Mesurements: ")
+    print("")
+
+    for label, result in mesurements.items():
+        result_sec = result / 1000000000
+
+        print(f"\t{label} - {result_sec} seconds")
+
+    print("")
+    print(" Counters: ")
+    print("")
+
+    count = dict(sorted(reporter.count.items()))
+
+    for label, result in count.items():
+        print(f"\t{label} - {result} times")
+
+    print("")
+
+    print(" ============================================== ")
+
+
+class NullReporter(Reporter):
+
+    def count_increment(self, name: str, value=1) -> int:
+        _ = name, value
+
+    def count_decrement(self, name: str, value=1) -> int:
+        _ = name, value
+
+    @contextmanager
+    def mesure_time(self, label: str) -> None:
+        _ = label
+
+    def print_report(self) -> None:
+        pass

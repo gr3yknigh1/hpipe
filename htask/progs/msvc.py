@@ -285,6 +285,7 @@ def show_includes(
     macros: dict[str, str] | None = None,
     language_standard: LanguageStandard | None = None,
     env: dict[str, str] | None=None,
+    **kw,
 ) -> list[str]:
     """Returns list of header-files on which given source file is dependent.
 
@@ -315,7 +316,7 @@ def show_includes(
 
     options_formatted = " ".join(options)
 
-    result = c.run(f"cl.exe /Zs {options_formatted} /showIncludes {source_file}", env=env, capture_output=True)
+    result = c.run(f"cl.exe /Zs {options_formatted} /showIncludes {source_file}", env=env, capture_output=True, **kw)
     assert result.output is not None
 
     prefix = "Note: including file:"

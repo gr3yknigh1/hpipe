@@ -61,8 +61,14 @@ class Context:
         timeout: float | None = None,
         encoding="utf-8",
         capture_output=False,
+        quiet=False,
         env: dict[str, Any] | None = None,
     ) -> Result:
+        """Execute shell command.
+
+        :param quiet: Overrides `self.confg.echo` for this call.
+        """
+
         parts = [*self.prefixes, *shlex.split(command, posix=sys.platform != "win32")]
         parts[0] = self.dequote(parts[0])
 
@@ -71,7 +77,7 @@ class Context:
 
         env = {**os.environ, **env}
 
-        if self.config.dry_run or self.config.echo:
+        if (self.config.dry_run or self.config.echo) and not quiet:
             print(f"> {' '.join(parts)}", flush=True)
 
         output: str | None = None

@@ -7,7 +7,7 @@ import os
 
 from htask import Context
 
-from hbuild import compile_package
+from hbuild import compile_project
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     assert echo is not None
 
     c = Context(root=working_dir)
-    compile_package(
+    compile_project(
         c, build_file=build_file, prefix=join(working_dir, "build")
     )
 
