@@ -7,7 +7,7 @@ import os
 
 from htask import Context
 
-from hbuild import compile_project
+from hbuild import compile_package
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -19,7 +19,7 @@ def main(argv: list[str] | None = None) -> int:
         "-C", "--directory", dest="working_dir", type=str, default=os.getcwd()
     )
     parser.add_argument(
-        "-f", "--file", dest="build_file", type=str, default="hbuild.py"
+        "-f", "--file", dest="build_file", type=str, default="build.py"
     )
     parser.add_argument("-e", dest="echo", type=bool, default=True)
     parser.add_argument("-n", "--dry-run", dest="dry_run", default=False)
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     assert echo is not None
 
     c = Context(root=working_dir)
-    compile_project(
+    compile_package(
         c, build_file=build_file, prefix=join(working_dir, "build")
     )
 

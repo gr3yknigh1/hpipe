@@ -4,10 +4,13 @@ from enum import StrEnum, IntEnum, auto
 from dataclasses import dataclass, field
 from os import makedirs
 from os.path import exists, isabs, join, splitext, basename, dirname
+from functools import lru_cache
 from copy import copy
 import importlib.util
 import sys
+import hashlib
 import inspect
+import pickle
 
 
 from htask import Context
@@ -115,6 +118,10 @@ class Language(StrEnum):
 class SourceFile:
     path: str
     language: Language
+
+    def __post_init__(self) -> None:
+
+        ...
 
 
 @dataclass
@@ -233,6 +240,29 @@ class Configuration:
 
     environment: dict[str, str] = field(default_factory=dict)
 
+    _local_cache: dict[str, str] = field(default_factory=dict)
+
+    def load_local_cache(self, file: str) -> None:
+        if exists(file):
+            with open(file, "rb+") as f:
+                loaded = pickle.load(f)
+                assert isinstance(loaded, dict)
+            self._local_cache.update(loaded)
+
+    def save_local_cache(self, file: str) -> None:
+
+        # Merge existing cache entries
+        if exists(file):
+            with open(file, "rb") as f:
+                loaded = pickle.load(f)
+                self._local_cache.update(loaded)
+
+        with open(file, "wb+") as f:
+            pickle.dump(self._local_cache, f)
+
+    def get_local_cache(self) -> dict[str, str]:
+        return self._local_cache
+
     def get_output_folder(self):
         return join(
             self.prefix,
@@ -243,10 +273,27 @@ class Configuration:
     def get_project_folder(self):
         return dirname(self.build_file)
 
+
 @dataclass
 class Package:
     name: str
     targets: Target
+
+
+# TODO(gr3yknigh1): For some reason `lru_cache` mess up hashing for include files. There is no cache hits, when
+# it's turned on. Investigate later! [2025/06/05]
+#@lru_cache(maxsize=1024)
+def compute_file_hash(file_path, *, algorithm="sha256", chunk_size=8192):
+    hash = hashlib.new(algorithm)
+    
+    with open(file_path, 'rb') as f:
+
+        chunk: bytes = f.read(chunk_size)
+        while len(chunk) > 0:
+            hash.update(chunk)
+            chunk = f.read(chunk_size)
+    
+    return hash
 
 
 def add_package(name: str, *, targets: list[Target]) -> Package:
@@ -338,9 +385,10 @@ def add_target(
     if sources is None:
         sources = []
 
-    source_files = []
+    source_files: list[SourceFile] = []
 
     for source in sources:
+
         language = Language.guess_from_ext(source)
 
         if language is None:
@@ -464,6 +512,10 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
     if sys.platform == "win32":
         includes = [include.replace("/", "\\") for include in includes]
 
+    output = target.get_artefact_path(conf)
+    output_filename, _ = splitext(output)
+
+    is_debug = conf.build_type == BuildType.DEBUG
 
     if conf.compiler == Compiler.MSVC:
         # TODO(gr3yknigh1): Expose to the user the libraries which he want's to link [2025/06/02]
@@ -473,24 +525,24 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
         # TODO(gr3yknigh1): Expose this option via platform-specific API configurations [2025/06/03]
         runtime_library = (
             msvc.RuntimeLibrary.STATIC_DEBUG
-            if conf.build_type == BuildType.DEBUG
+            if is_debug
             else msvc.RuntimeLibrary.STATIC
         )
 
-
         debug_info_mode = (
             msvc.DebugInfoMode.FULL
-            if conf.build_type == BuildType.DEBUG
+            if is_debug
             else msvc.DebugInfoMode.NONE
         )
 
         optimization_level = (
             msvc.OptimizationLevel.DISABLED
-            if conf.build_type == BuildType.DEBUG
+            if is_debug
             else msvc.OptimizationLevel.MAXIMIZE_SPEED
         )
 
         for source in sources:
+
             source_name, source_ext = splitext(basename(source.path))
             object_file = join(target_output_prefix, f"{source_name}.obj")
 
@@ -509,48 +561,79 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
             if sys.platform == "win32":
                 source_path = source_path.replace("/", "\\")
 
-            result = msvc.compile(
-                c,
-                [source_path],
-                output=object_file,
-                only_compilation=True,
-                produce_pdb=conf.build_type == BuildType.DEBUG,
+            assert exists(source.path)
+
+            #
+            # NOTE(gr3yknigh1):
+            #
+            # What should be included in object caching?
+            #
+            # * Configuration:
+            #     - Build type: debug, release, etc.
+            #     - Architecture: x86_64, x64, arm, arm64, etc.
+            #     - Compiler (+ version): MSVC (cl.exe), gcc, clang, etc.
+            #         - Compiler flags: Optimization level, debug information mode.
+            #         - Language (+ standard): C++20, C11, etc.
+            #     - Linker (+ version): MSVC (link.exe), ln, mold, etc.
+            #         - Runtime library linkage: dynamic / static (for MSVC).
+            #         - Output format: Windows (PE), Linux (ELF), etc.
+            #         - Output debug format: Windows (PDB, RadDebugger), Linux (DWARF), etc.
+            #         - Order of libraries during linkage?
+            # * Source code of translation units. Also headers files which are included!
+            #
+            # [2025/06/05]
+            #
+            
+            source_include_files = msvc.show_includes(
+                c, source_path,
                 includes=includes,
-                defines=macros,
-                output_kind=msvc.OutputKind.OBJECT_FILE,
-                optimization_level=optimization_level,
+                macros=macros,
                 language_standard=language_standard,
-                debug_info_mode=debug_info_mode,
-                runtime_library=runtime_library,
                 env=conf.environment,
             )
 
-            if result.return_code != 0:
-                raise Exception(
-                    f"Failed to compile! return_code={result.return_code!r}"
+            source_hash = compute_file_hash(source.path)
+            source_hash.update(language_standard.value.encode("utf-8"))
+            source_hash.update(bytes(int(optimization_level.value)))
+            for source_include_file in source_include_files:
+                source_include_file_hash = compute_file_hash(source_include_file)
+                # print(source_include_file_hash.digest(), " ====================> ", source_include_file)
+                source_hash.update(source_include_file_hash.digest())
+
+            local_cache = conf.get_local_cache()
+
+            source_hash_digest = source_hash.digest()
+            cached_object_file_source_hash_digest = local_cache.get(object_file, None)
+
+            if cached_object_file_source_hash_digest is not None and cached_object_file_source_hash_digest == source_hash_digest:
+                print(f">>> Cache hit! {source.path!r} hash={source_hash_digest!r} local_cache={local_cache!r} include_files={source_include_files!r}")
+            else:
+                print(f">>> Cache miss! {source.path!r} hash={source_hash_digest!r} cached_hash={cached_object_file_source_hash_digest!r} local_cache={local_cache!r} include_files={source_include_files!r}")
+
+                result = msvc.compile(
+                    c,
+                    [source_path],
+                    output=object_file,
+                    only_compilation=True,
+                    produce_pdb=is_debug,
+                    includes=includes,
+                    defines=macros,
+                    output_kind=msvc.OutputKind.OBJECT_FILE,
+                    optimization_level=optimization_level,
+                    language_standard=language_standard,
+                    debug_info_mode=debug_info_mode,
+                    runtime_library=runtime_library,
+                    env=conf.environment,
                 )
 
+                if result.return_code != 0:
+                    raise Exception(
+                        f"Failed to compile! return_code={result.return_code!r}."
+                    )
+
+                local_cache[object_file] = source_hash_digest
+
             object_files.append(object_file)
-
-        output = target.get_artefact_path(conf)
-        output_filename, _ = splitext(output)
-
-        compile_flags = []
-        link_flags = []
-
-        if conf.build_type == BuildType.DEBUG:
-            # TODO(gr3yknigh1): Move to MSVC interface (msvc.py) [2025/06/02]
-
-            compile_flags.extend(
-                [
-                    "/Zi",
-                ]
-            )
-            link_flags.extend(
-                [
-                    "/DEBUG:FULL",
-                ]
-            )
 
         if target.kind == TargetKind.EXECUTABLE:
             result = msvc.compile(
@@ -559,8 +642,8 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
                 output=output,
                 output_kind=msvc.OutputKind.EXECUTABLE,
                 output_debug_info_path=f"{output_filename}.pdb",
-                compile_flags=compile_flags,
-                link_flags=link_flags,
+                produce_pdb=is_debug,
+                debug_info_mode=debug_info_mode,
                 libs=[*object_files, *libraries],
                 env=conf.environment,
             )
@@ -580,7 +663,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
                 output_kind=msvc.OutputKind.DYNAMIC_LIBRARY,
                 output_debug_info_path=f"{output_filename}.pdb",
                 debug_info_mode=debug_info_mode,
-                produce_pdb=conf.build_type == BuildType.DEBUG,
+                produce_pdb=is_debug,
                 libs=libraries,
                 env=conf.environment,
                 is_dll=True,
@@ -633,6 +716,7 @@ def compile_package(
 
     if len(packages) <= 0:
         raise Exception("No packages was found! Use `add_package` in order to wrap targets in compilable project.")
+
     properties = TargetProperties()
     # TODO(gr3yknigh1): Expose more configuration stuff in command-line [2025/06/01]
     conf = configure(
@@ -644,8 +728,14 @@ def compile_package(
         prefix=prefix,
     )
 
+    cache_file = join(conf.get_output_folder(), "cache.pickle")
+
+    conf.load_local_cache(cache_file)
+
     for package in packages:
         for target in package.targets:
             properties = properties.merge(compile_target(c, conf=conf, target=target))
+
+    conf.save_local_cache(cache_file)
 
     return properties

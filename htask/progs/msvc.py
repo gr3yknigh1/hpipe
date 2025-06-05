@@ -275,3 +275,62 @@ def link(
         raise NotImplementedError("...")
 
     return result
+
+
+def show_includes(
+    c: Context,
+    source_file: str,
+    *,
+    includes: list[str] | None = None,
+    macros: dict[str, str] | None = None,
+    language_standard: LanguageStandard | None = None,
+    env: dict[str, str] | None=None,
+) -> list[str]:
+    """Returns list of header-files on which given source file is dependent.
+
+    :param includes: List of directories which should be added to include PATH.
+
+    """
+
+    if env is None:
+        env = {}
+
+    if includes is None:
+        includes = []
+
+    if macros is None:
+        macros = {}
+
+    options = []
+
+
+    if language_standard is not None:
+        options.append(f"/std:{language_standard!s}")
+
+    if len(macros.keys()) > 0:
+        options.append(format_defines(macros))
+
+    if len(includes) > 0:
+        options.append(format_includes(includes))
+
+    options_formatted = " ".join(options)
+
+    result = c.run(f"cl.exe /Zs {options_formatted} /showIncludes {source_file}", env=env, capture_output=True)
+    assert result.output is not None
+
+    prefix = "Note: including file:"
+
+    include_files = []
+
+    for line in result.output.split("\n"):
+        if not line.startswith(prefix):
+            continue
+        line = line.replace(prefix, "", 1)
+        line = line.strip()
+
+        assert c.exists(line)
+        include_files.append(line)
+
+    return include_files
+
+
