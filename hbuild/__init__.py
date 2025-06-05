@@ -184,10 +184,10 @@ class Target:
 
                 # TODO(gr3yknigh1): Check for multi-config generators. See: https://cmake.org/cmake/help/latest/prop_gbl/GENERATOR_IS_MULTI_CONFIG.html o
                 # [2025/06/03]
-                return join(conf.get_output_folder(), "_external_cmake", self.name, self.name, conf.build_type, f"{self.name}{ext}")
+                return join(conf.get_output_folder(), ".external.cmake", self.name, self.name, conf.build_type, f"{self.name}{ext}")
 
             if self.external_build.tool == BuildTool.HBUILD:
-                return join(conf.get_output_folder(), "_external", self.name, arch_to_bitness(conf.architecture), conf.build_type, f"{self.name}{ext}" )
+                return join(conf.get_output_folder(), f"{self.name}{ext}" )
 
             breakpoint()
             raise NotImplementedError("...")
@@ -377,7 +377,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
             result_props = compile_package(
                 c,
                 build_file=join(external_build.location, external_build.build_file),
-                prefix=join(conf.get_output_folder(), "_external", target.name),
+                prefix=conf.prefix,
 
                 # TODO(gr3yknigh1): Maybe it's better to pass Configuration? [2025/06/04]
                 compiler=conf.compiler,
@@ -394,7 +394,7 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
         elif external_build.tool == BuildTool.CMAKE:
             # TODO(gr3yknigh1): Find better way of handling properties of external dependencies. [2025/06/03]
 
-            target_output_folder = join(conf.get_output_folder(), "_external_cmake", target.name)
+            target_output_folder = join(conf.get_output_folder(), ".external.cmake", target.name)
             makedirs(target_output_folder, exist_ok=True)
 
             cmake.configure(
@@ -464,8 +464,6 @@ def compile_target(c: Context, *, conf: Configuration, target: Target) -> Target
     if sys.platform == "win32":
         includes = [include.replace("/", "\\") for include in includes]
 
-
-    print("<========= ", target.name, target.properties, includes)
 
     if conf.compiler == Compiler.MSVC:
         # TODO(gr3yknigh1): Expose to the user the libraries which he want's to link [2025/06/02]
@@ -612,8 +610,6 @@ def compile_package(
     build_type=BuildType.DEBUG,
     architecture=Architecture.X86_64,
 ) -> TargetProperties:
-    print(f"> Compiling {build_file!r}")  # XXX
-
     filename = basename(build_file)
 
     module_spec = importlib.util.spec_from_file_location(
