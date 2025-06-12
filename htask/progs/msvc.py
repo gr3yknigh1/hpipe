@@ -111,6 +111,20 @@ class OptimizationLevel(IntEnum):
     DISABLED = auto()
     MINIMIZE_SIZE = auto()
     MAXIMIZE_SPEED = auto()
+
+
+class ExceptionHandle(IntEnum):
+    HANDLE_CXX = auto()
+    HANDLE_CXX_SEH = auto()
+
+    # TODO(gr3yknigh1): Add more options 
+    # ref: https://learn.microsoft.com/en-us/cpp/build/reference/eh-exception-handling-model?view=msvc-170
+    # [2025/06/10]
+
+EXCEPTION_HANDLE_TO_FLAG = {
+    ExceptionHandle.HANDLE_CXX: "/EHs",
+    ExceptionHandle.HANDLE_CXX_SEH: "/EHa",
+}
     
 
 def compile(
@@ -133,6 +147,7 @@ def compile(
     optimization_level: OptimizationLevel | None = None,
     language_standard: LanguageStandard | None = None,
     runtime_library: RuntimeLibrary | None = None,
+    exception_handle: ExceptionHandle | None = None,
 
     # TODO(gr3yknigh1): Refactor linker flags out from this function [2025/06/03]
     debug_info_mode: DebugInfoMode | None = None,
@@ -174,6 +189,10 @@ def compile(
 
     if language_standard is not None:
         compile_flags.append(f"/std:{language_standard!s}")
+
+    if exception_handle is not None:
+        exception_handle_flag = EXCEPTION_HANDLE_TO_FLAG[exception_handle]
+        compile_flags.append(exception_handle_flag)
 
     if runtime_library is not None:
 
@@ -284,6 +303,7 @@ def show_includes(
     includes: list[str] | None = None,
     macros: dict[str, str] | None = None,
     language_standard: LanguageStandard | None = None,
+    exception_handle: ExceptionHandle | None = None,
     env: dict[str, str] | None=None,
     **kw,
 ) -> list[str]:
@@ -304,6 +324,10 @@ def show_includes(
 
     options = []
 
+
+    if exception_handle is not None:
+        exception_handle_flag = EXCEPTION_HANDLE_TO_FLAG[exception_handle]
+        options.append(exception_handle_flag)
 
     if language_standard is not None:
         options.append(f"/std:{language_standard!s}")

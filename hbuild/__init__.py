@@ -600,6 +600,7 @@ def compile_target(c: Context, *, conf: Configuration, package: Package, target:
                 includes=includes,
                 macros=macros,
                 language_standard=language_standard,
+                exception_handle=msvc.ExceptionHandle.HANDLE_CXX_SEH,
                 env=conf.environment,
                 quiet=True,
             )
@@ -635,6 +636,7 @@ def compile_target(c: Context, *, conf: Configuration, package: Package, target:
                         includes=includes,
                         defines=macros,
                         output_kind=msvc.OutputKind.OBJECT_FILE,
+                        exception_handle=msvc.ExceptionHandle.HANDLE_CXX_SEH,
                         optimization_level=optimization_level,
                         language_standard=language_standard,
                         debug_info_mode=debug_info_mode,
