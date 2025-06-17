@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from os.path import exists, isabs, join, splitext, basename, dirname
+from os.path import exists, isabs, join, splitext, basename, dirname, getmtime
 from dataclasses import dataclass, field
 from contextlib import contextmanager
 from enum import StrEnum, IntEnum, auto
@@ -21,6 +21,7 @@ from htask.progs import msvc, cmake
 
 __all__ = (
     "Target",
+    "TargetAttributes",
     "TargetKind",
     "add_package",
     "add_target",
@@ -42,6 +43,8 @@ __all__ = (
     "Reporter",
     "NullReporter",
     "print_report",
+    "pick_output_ext",
+    "pick_output_name",
 )
 
 HBUILD_MAGIC_PACKAGE_LIST_ATTR_NAME = "__hbuild_magic_package_list__"
@@ -126,7 +129,6 @@ class SourceFile:
     language: Language
 
     def __post_init__(self) -> None:
-
         ...
 
 
@@ -155,6 +157,66 @@ class Access(IntEnum):
     PUBLIC = auto()
 
 
+
+def pick_output_ext(target: Target, conf: Configuration) -> str:
+
+    if conf.compiler == Compiler.MSVC:
+
+        if target.kind == TargetKind.EXECUTABLE:
+            return ".exe"
+
+        if target.kind == TargetKind.STATIC_LIBRARY:
+            return ".lib"
+
+        if target.kind == TargetKind.DYNAMIC_LIBRARY:
+            return ".dll"
+
+    raise NotImplementedError(f"Unhandled compiler id! compiler_id={conf.compiler!r}")
+
+
+def pick_output_name(target: Target, conf: Configuration) -> str:
+    ext = pick_output_ext(target, conf)
+    result = f"{target.name}{ext}"
+    return result
+
+
+def pick_output_folder(target: Target, conf: Configuration) -> str:
+
+    if target.external_build is not None:
+        # TODO(gr3yknigh1): Find better way of handling properties of external dependencies. [2025/06/03]
+
+        if target.external_build.tool == BuildTool.CMAKE:
+
+            # TODO(gr3yknigh1): Check for multi-config generators. See: https://cmake.org/cmake/help/latest/prop_gbl/GENERATOR_IS_MULTI_CONFIG.html o
+            # [2025/06/03]
+            return join(conf.get_output_folder(), ".external.cmake", target.name, target.name, conf.build_type)
+
+        if target.external_build.tool == BuildTool.HBUILD:
+            return conf.get_output_folder()
+
+        breakpoint()
+        raise NotImplementedError("...")
+
+    return conf.get_output_folder()
+
+
+# TODO(gr3yknigh1): Find better name for it. [2025/06/17]
+@dataclass
+class TargetAttributes:
+    output_name: str | Callable[[Target, Configuration], str] = field(default=pick_output_name)
+    output_folder: str | Callable[[Target, Configuration], str] = field(default=pick_output_folder)
+
+    def get_output_name(self, *, target: Target, conf: Configuration) -> str:
+        if callable(self.output_name):
+            return self.output_name(target, conf)
+        return self.output_name
+
+    def get_output_folder(self, *, target: Target, conf: Configuration) -> str:
+        if callable(self.output_folder):
+            return self.output_folder(target, conf)
+        return self.output_folder
+
+
 @dataclass
 class Target:
     name: str
@@ -167,45 +229,16 @@ class Target:
 
     external_build: ExternalBuildProps | None = field(default=None)
 
+    attributes: TargetAttributes = field(default_factory=TargetAttributes)
+
     def __post_init__(self):
         for access in Access:
             self.properties[access] = TargetProperties()
 
-
-    def get_artefact_ext(self, conf: Configuration) -> str:
-
-        if conf.compiler == Compiler.MSVC:
-
-            if self.kind == TargetKind.EXECUTABLE:
-                return ".exe"
-
-            if self.kind == TargetKind.STATIC_LIBRARY:
-                return ".lib"
-
-            if self.kind == TargetKind.DYNAMIC_LIBRARY:
-                return ".dll"
-
-        raise NotImplementedError("...")
-
     def get_artefact_path(self, conf: Configuration) -> str:
-        ext = self.get_artefact_ext(conf)
-
-        if self.external_build is not None:
-            # TODO(gr3yknigh1): Find better way of handling properties of external dependencies. [2025/06/03]
-
-            if self.external_build.tool == BuildTool.CMAKE:
-
-                # TODO(gr3yknigh1): Check for multi-config generators. See: https://cmake.org/cmake/help/latest/prop_gbl/GENERATOR_IS_MULTI_CONFIG.html o
-                # [2025/06/03]
-                return join(conf.get_output_folder(), ".external.cmake", self.name, self.name, conf.build_type, f"{self.name}{ext}")
-
-            if self.external_build.tool == BuildTool.HBUILD:
-                return join(conf.get_output_folder(), f"{self.name}{ext}" )
-
-            breakpoint()
-            raise NotImplementedError("...")
-
-        return join(conf.get_output_folder(), f"{self.name}{ext}")
+        output_folder = self.attributes.get_output_folder(target=self, conf=conf)
+        output_name = self.attributes.get_output_name(target=self, conf=conf)
+        return join(output_folder, output_name)
 
 
 def configure(
@@ -347,7 +380,9 @@ class ExternalBuildProps:
     build_file: str = field(default="build.py")
 
 
-def add_external_library(name: str, *, location: str, tool=BuildTool.HBUILD, dynamic=False) -> Target:
+
+def add_external_library(name: str, *, location: str, tool=BuildTool.HBUILD, dynamic=False, attributes: TargetAttributes | None = None) -> Target:
+
     return add_target(
         name,
         kind=(
@@ -358,7 +393,8 @@ def add_external_library(name: str, *, location: str, tool=BuildTool.HBUILD, dyn
         external_build=ExternalBuildProps(
             tool=tool,
             location=location,
-        )
+        ),
+        attributes=attributes,
     )
 
 
@@ -381,15 +417,20 @@ def target_links(target, access=Access.PRIVATE, *, links: list[Target]) -> None:
     target.properties[access].links.extend(links)
 
 
+
 def add_target(
     name: str,
     kind: TargetKind,
     sources: list[str] | None = None,
     external_build: ExternalBuildProps | None = None,
+    attributes: TargetAttributes | None = None,
 ) -> Target:
 
     if sources is None:
         sources = []
+
+    if attributes is None:
+        attributes = TargetAttributes()
 
     source_files: list[SourceFile] = []
 
@@ -402,7 +443,7 @@ def add_target(
 
         source_files.append(SourceFile(path=source, language=language))
 
-    target = Target(name=name, kind=kind, sources=source_files, external_build=external_build)
+    target = Target(name=name, kind=kind, sources=source_files, external_build=external_build, attributes=attributes)
 
     return target
 

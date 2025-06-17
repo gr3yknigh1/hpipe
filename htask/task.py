@@ -20,6 +20,8 @@ class Task:
     required_programs: list[str] = field(default_factory=list)
 
 
+
+
 @dataclass
 class Config:
     dry_run: bool = field(default=False)
@@ -133,12 +135,19 @@ class Context:
         finally:
             pass
 
+    # TODO(gr3yknigh1): Deprecate and remove this code. I do not known for sure is this good
+    # idea to wrap common utilities. Original reason was to provide `echo` mode. Were you
+    # can emulate what might happen during your task execution. Also I was what to provide
+    # virtual FS for `echo` mode and `if-s` in this cases will be executed corretly
+    # (when you trying to check existence of file).
+    # [2025/06/10]
     def echo(self, msg: str) -> Result:
         if sys.platform == "win32":
             # NOTE(gr3yknigh1): Need no quotes in cmd.exe shell [2025/04/06]
             return self.run(f"echo {msg}")
         return self.run(f"echo {msg!r}")
 
+    # NOTE(gr3yknigh1): Check note above `echo`. [2025/06/10]
     def mkdir(self, dir: str) -> Result:
         if self.config.dry_run:
             return self.run(f"mkdir {dir}")
