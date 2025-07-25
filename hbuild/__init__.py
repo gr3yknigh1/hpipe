@@ -261,9 +261,13 @@ def configure(
     makedirs(output, exist_ok=True)
 
     if conf.compiler == Compiler.MSVC:
-        env = msvc.extract_env_from_vcvars(
-            c, arch=arch_to_bitness(architecture)
-        )
+        cached_env = c.join(output, "vc.env")
+
+        if exists(cached_env):
+            env = load_env(cached_env)
+        else:
+            env = msvc.extract_env_from_vcvars(c, arch=arch_to_bitness(architecture))
+            save_env(cached_env, env)
         conf.environment.update(env)
 
     return conf
@@ -880,3 +884,19 @@ class NullReporter(Reporter):
 
     def print_report(self) -> None:
         pass
+
+def load_env(file: str) -> dict[str, str]:
+    with open(file, mode="r") as f:
+        s = f.read()
+
+        env = {
+            item[0]: item[1]
+            for item in (l.split("=") for l in s.splitlines())
+            if len(item) == 2
+        }
+    return env
+
+def save_env(file: str, env: dict[str, Any]) -> None:
+    with open(file, mode="w") as f:
+        for k, v in env.items():
+            f.write(f"{k}={v}\n")
