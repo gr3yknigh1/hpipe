@@ -882,6 +882,12 @@ class NullReporter(Reporter):
     def mesure_time(self, label: str) -> None:
         _ = label
 
+        try:
+            yield
+        finally:
+            pass
+
+
     def print_report(self) -> None:
         pass
 
