@@ -125,6 +125,7 @@ EXCEPTION_HANDLE_TO_FLAG = {
     ExceptionHandle.HANDLE_CXX: "/EHs",
     ExceptionHandle.HANDLE_CXX_SEH: "/EHa",
 }
+
     
 
 def compile(
